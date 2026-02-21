@@ -1,0 +1,52 @@
+# Build directories
+build/
+build-*/
+out/
+
+# CMake generated
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+install_manifest.txt
+CTestTestfile.cmake
+_deps/
+
+# Compiled output
+*.a
+*.so
+*.so.*
+*.dylib
+*.o
+*.obj
+
+# Executables
+hexcaster_standalone
+hexcaster_tests
+
+# LV2 bundle install (local dev)
+~/.lv2/hexcaster.lv2/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.clangd/
+.cache/
+
+# clang tooling
+compile_commands.json
+
+# NAM model files (large binaries, not tracked)
+*.nam
+
+# IR files (large binaries, not tracked)
+*.wav
+*.aif
+*.aiff
+
+# OS
+.DS_Store
+Thumbs.db
