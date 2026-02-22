@@ -4,6 +4,7 @@
 
 add_library(hexcaster_components STATIC
   components/src/gain_stage.cpp
+  components/src/nam_stage.cpp
 )
 
 target_include_directories(hexcaster_components
@@ -14,6 +15,7 @@ target_include_directories(hexcaster_components
 target_link_libraries(hexcaster_components
   PUBLIC
     hexcaster_params
+    NeuralAudio
 )
 
 # --- hexcaster_pipeline ---
