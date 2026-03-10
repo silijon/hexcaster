@@ -2,7 +2,7 @@
 
 Neural dynamic gain amp platform for Linux / Raspberry Pi.
 
-HexCaster is a DSP-core-first guitar amplifier engine built around Neural Amp Modeling (NAM). It provides dynamic pre/post gain control ("Bloom"), IR convolution cabinet simulation, parametric EQ, and algorithmic reverb. The core is real-time safe, framework-independent, and targets embedded deployment on Raspberry Pi 5.
+HexCaster is a DSP-core-first guitar amplifier engine built around Neural Amp Modeling (NAM). It provides dynamic pre/post gain control ("Bloom"), parametric EQ, and algorithmic reverb. The core is real-time safe, framework-independent, and targets embedded deployment on Raspberry Pi 5.
 
 Hosting wrappers (LV2, standalone daemon) are thin layers over the DSP core. The LV2 plugin is the primary development and validation target; the standalone runtime is the production deployment target.
 
@@ -102,12 +102,6 @@ cmake --install build
 Input → Envelope Follower → Pre-Gain → NAM → Post-Gain → Post EQ → Output
 ```
 
-**Direct Mode** (headphones / recording):
-
-```
-Input → Envelope Follower → Pre-Gain → NAM → IR Convolution → Reverb → Post EQ → Post-Gain → Output
-```
-
 The Bloom controller drives both pre-gain and post-gain from a single envelope follower, keeping them synchronised:
 
 ```
@@ -119,7 +113,7 @@ PostGain_dB = BasePost + B * envelope
 
 | Phase | Status | Scope |
 |-------|--------|-------|
-| 1 | In progress | Envelope, Bloom, EQ, IR convolution |
+| 1 | In progress | Envelope, Bloom, EQ |
 | 2 | Planned | NAM integration, Pi benchmarking |
 | 3 | Planned | Reverb, dominance-linked control |
 | 4 | Planned | Hardware, MIDI, preset system |
