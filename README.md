@@ -18,21 +18,18 @@ hexcaster/
 │   ├── lv2/            # LV2 plugin wrapper
 │   └── standalone/     # Headless JACK/ALSA runtime
 ├── tests/              # Build validation and DSP unit tests
-└── external/           # Git submodules (NeuralAudio, added in Phase 2)
+└── external/           # Dependencies (NeuralAudio fetched via CMake FetchContent)
 ```
 
 ## Dependencies
 
 **Required:**
 - CMake >= 3.18
-- GCC with C++17 support
+- GCC with C++20 support
+- `libasound2-dev` (Debian/Ubuntu) / `alsa-lib-devel` (Fedora)
 
-**For LV2 plugin:**
-- `lv2-devel` (Fedora) / `liblv2-dev` (Debian/Ubuntu)
-
-**For standalone runtime (Phase 2+):**
-- JACK or PipeWire (JACK-compatible mode)
-- ALSA
+**For LV2 plugin (optional):**
+- `liblv2-dev` (Debian/Ubuntu) / `lv2-devel` (Fedora)
 
 ## Building
 
@@ -66,7 +63,36 @@ To load in Reaper or another LV2 host, rescan plugins. The plugin appears as **H
 
 ```sh
 cmake --build build --target hexcaster_standalone -j$(nproc)
-./build/hosts/standalone/hexcaster_standalone
+```
+
+Run with a NAM model:
+
+```sh
+./build/hosts/standalone/hexcaster_standalone \
+  --model /path/to/model.nam \
+  --device hw:2,0 \
+  --buffer 128
+```
+
+Separate input and output devices:
+
+```sh
+./build/hosts/standalone/hexcaster_standalone \
+  --model /path/to/model.nam \
+  --input-device hw:2,0 \
+  --output-device hw:3,0
+```
+
+List available ALSA devices:
+
+```sh
+./build/hosts/standalone/hexcaster_standalone --list-devices
+```
+
+See all options:
+
+```sh
+./build/hosts/standalone/hexcaster_standalone --help
 ```
 
 ### Build everything
@@ -102,6 +128,12 @@ cmake --install build
 Input → Envelope Follower → Pre-Gain → NAM → Post-Gain → Post EQ → Output
 ```
 
+**Direct Mode** (headphones / recording):
+
+```
+Input → Envelope Follower → Pre-Gain → NAM → IR Convolution → Reverb → Post EQ → Post-Gain → Output
+```
+
 The Bloom controller drives both pre-gain and post-gain from a single envelope follower, keeping them synchronised:
 
 ```
@@ -113,8 +145,8 @@ PostGain_dB = BasePost + B * envelope
 
 | Phase | Status | Scope |
 |-------|--------|-------|
-| 1 | In progress | Envelope, Bloom, EQ |
-| 2 | Planned | NAM integration, Pi benchmarking |
+| 1 | In progress | Envelope, Bloom, EQ, IR convolution |
+| 2 | Done | NAM integration, standalone ALSA host |
 | 3 | Planned | Reverb, dominance-linked control |
 | 4 | Planned | Hardware, MIDI, preset system |
 
