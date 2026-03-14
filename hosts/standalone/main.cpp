@@ -16,6 +16,8 @@
 #include <unistd.h>
 #include <vector>
 
+#include <alsa/asoundlib.h>
+
 // ---------------------------------------------------------------------------
 // Signal handling -- Ctrl+C sets this flag, audio loop checks it
 // ---------------------------------------------------------------------------
@@ -148,9 +150,6 @@ static void listAlsaDevices()
     }
     snd_device_name_free_hint(hints);
 }
-
-// We need the ALSA header for listAlsaDevices -- include it only in this TU
-#include <alsa/asoundlib.h>
 
 // ---------------------------------------------------------------------------
 // main
