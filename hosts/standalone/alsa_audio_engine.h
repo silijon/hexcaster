@@ -26,12 +26,13 @@ namespace hexcaster {
  *               config.outputChannels bitmask. Unused channels get silence.
  *
  * Sample format negotiation:
- *   Probes for FLOAT_LE first, then S32_LE, then S16_LE. Conversion to/from
- *   float is handled internally -- the ProcessCallback always sees float.
+ *   Probes for S16_LE first (universal USB support), then S32_LE, then
+ *   FLOAT_LE. Conversion to/from float is handled internally -- the
+ *   ProcessCallback always sees float.
  *
  * Xrun recovery:
- *   On EPIPE (underrun/overrun), calls snd_pcm_prepare() on the affected
- *   handle and continues. On unrecoverable errors, run() returns.
+ *   On EPIPE (underrun/overrun), prepares both handles and re-primes the
+ *   playback buffer before resuming to prevent cascade xruns.
  */
 class AlsaAudioEngine : public AudioEngine {
 public:
@@ -54,11 +55,15 @@ public:
 private:
     enum class SampleFormat { Float32, Int32, Int16 };
 
+    static int bytesPerSample(SampleFormat fmt);
+
     bool openHandle(const std::string& device, bool isCapture,
-                    snd_pcm_t*& handle, unsigned int channels);
-    bool negotiateFormat(snd_pcm_t* handle, unsigned int channels,
-                         SampleFormat& fmt);
-    bool recoverXrun(snd_pcm_t* handle, int err, const char* side);
+                    snd_pcm_t*& handle, unsigned int& channels,
+                    SampleFormat& fmt);
+
+    bool recoverBoth();
+
+    void primePlayback();
 
     // Interleaved raw buffer -> mono float (extract one channel)
     void deinterleaveCapture(const void* raw, float* mono,
@@ -70,10 +75,11 @@ private:
 
     snd_pcm_t*    captureHandle_  = nullptr;
     snd_pcm_t*    playbackHandle_ = nullptr;
+    bool          linked_         = false;  // true if handles are snd_pcm_link'd
 
     Config        config_;
-    SampleFormat  captureFmt_   = SampleFormat::Float32;
-    SampleFormat  playbackFmt_  = SampleFormat::Float32;
+    SampleFormat  captureFmt_       = SampleFormat::Int16;
+    SampleFormat  playbackFmt_      = SampleFormat::Int16;
     unsigned int  captureChannels_  = 2;
     unsigned int  playbackChannels_ = 2;
     unsigned int  actualRate_       = 0;
@@ -82,6 +88,9 @@ private:
     // Raw interleaved capture/playback buffers (allocated at open time)
     std::vector<uint8_t> captureRaw_;
     std::vector<uint8_t> playbackRaw_;
+
+    // Silence buffer for playback priming (same size as playbackRaw_)
+    std::vector<uint8_t> silenceRaw_;
 
     // Mono float working buffer
     std::vector<float> monoBuffer_;

@@ -11,6 +11,20 @@
 namespace hexcaster {
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+int AlsaAudioEngine::bytesPerSample(SampleFormat fmt)
+{
+    switch (fmt) {
+        case SampleFormat::Float32: return 4;
+        case SampleFormat::Int32:   return 4;
+        case SampleFormat::Int16:   return 2;
+    }
+    return 2;
+}
+
+// ---------------------------------------------------------------------------
 // Destructor
 // ---------------------------------------------------------------------------
 
@@ -26,31 +40,49 @@ AlsaAudioEngine::~AlsaAudioEngine()
 bool AlsaAudioEngine::open(const Config& config)
 {
     config_ = config;
-
-    // Determine hardware channel counts. Most USB interfaces are stereo (2).
-    // We always open the device at its native channel count and extract/inject
-    // the channels we need at the conversion boundary.
     captureChannels_  = 2;
     playbackChannels_ = 2;
 
-    if (!openHandle(config_.inputDevice, true, captureHandle_, captureChannels_))
+    if (!openHandle(config_.inputDevice,  true,  captureHandle_,  captureChannels_,  captureFmt_))
         return false;
 
-    if (!openHandle(config_.outputDevice, false, playbackHandle_, playbackChannels_))
+    if (!openHandle(config_.outputDevice, false, playbackHandle_, playbackChannels_, playbackFmt_))
         return false;
 
-    // Pre-allocate raw interleaved buffers.
-    // Worst case: Int32 = 4 bytes per sample.
-    const int frames  = static_cast<int>(actualFrames_);
-    captureRaw_.resize(static_cast<std::size_t>(frames) * captureChannels_  * 4, 0);
-    playbackRaw_.resize(static_cast<std::size_t>(frames) * playbackChannels_ * 4, 0);
-    monoBuffer_.resize(static_cast<std::size_t>(frames), 0.f);
+    // Link handles when using the same device for synchronised start
+    if (config_.inputDevice == config_.outputDevice) {
+        int err = snd_pcm_link(captureHandle_, playbackHandle_);
+        if (err == 0) {
+            linked_ = true;
+        } else {
+            std::fprintf(stderr,
+                "Note: snd_pcm_link failed (%s) -- streams will start independently\n",
+                snd_strerror(err));
+        }
+    }
+
+    // Pre-allocate raw interleaved buffers using actual negotiated format sizes
+    const int frames = static_cast<int>(actualFrames_);
+    captureRaw_.assign(
+        static_cast<std::size_t>(frames) * captureChannels_ * bytesPerSample(captureFmt_), 0);
+    playbackRaw_.assign(
+        static_cast<std::size_t>(frames) * playbackChannels_ * bytesPerSample(playbackFmt_), 0);
+    silenceRaw_.assign(playbackRaw_.size(), 0);
+    monoBuffer_.assign(static_cast<std::size_t>(frames), 0.f);
 
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// openHandle()
+//
+// Key principle: all constraints are applied to the SAME hw_params object.
+// We reset and re-constrain if a format attempt fails.
+// ---------------------------------------------------------------------------
+
 bool AlsaAudioEngine::openHandle(const std::string& device, bool isCapture,
-                                   snd_pcm_t*& handle, unsigned int channels)
+                                   snd_pcm_t*& handle, unsigned int& channels,
+                                   SampleFormat& fmt)
 {
     const snd_pcm_stream_t stream = isCapture
         ? SND_PCM_STREAM_CAPTURE
@@ -64,110 +96,93 @@ bool AlsaAudioEngine::openHandle(const std::string& device, bool isCapture,
         return false;
     }
 
+    // Format probe list -- S16_LE first as it has universal USB support.
+    // The ProcessCallback always receives float; conversion happens at the edge.
+    const struct { snd_pcm_format_t alsa; SampleFormat our; const char* name; } formats[] = {
+        { SND_PCM_FORMAT_S16_LE,   SampleFormat::Int16,   "S16_LE"   },
+        { SND_PCM_FORMAT_S32_LE,   SampleFormat::Int32,   "S32_LE"   },
+        { SND_PCM_FORMAT_FLOAT_LE, SampleFormat::Float32, "FLOAT_LE" },
+    };
+
     snd_pcm_hw_params_t* hw = nullptr;
     snd_pcm_hw_params_alloca(&hw);
-    snd_pcm_hw_params_any(handle, hw);
+    bool configured = false;
 
-    // Access: interleaved r/w
-    err = snd_pcm_hw_params_set_access(handle, hw, SND_PCM_ACCESS_RW_INTERLEAVED);
-    if (err < 0) {
-        errorMsg_ = std::string("Cannot set interleaved access: ") + snd_strerror(err);
-        return false;
-    }
+    for (auto& f : formats) {
+        // Start fresh each attempt
+        snd_pcm_hw_params_any(handle, hw);
 
-    // Format: probe best available
-    SampleFormat& fmt = isCapture ? captureFmt_ : playbackFmt_;
-    if (!negotiateFormat(handle, channels, fmt))
-        return false;
+        if (snd_pcm_hw_params_set_access(handle, hw, SND_PCM_ACCESS_RW_INTERLEAVED) < 0)
+            continue;
+        if (snd_pcm_hw_params_set_format(handle, hw, f.alsa) < 0)
+            continue;
 
-    // Sample rate
-    unsigned int rate = config_.sampleRate;
-    err = snd_pcm_hw_params_set_rate_near(handle, hw, &rate, nullptr);
-    if (err < 0) {
-        errorMsg_ = std::string("Cannot set sample rate: ") + snd_strerror(err);
-        return false;
-    }
-    actualRate_ = rate;
+        // Rate
+        unsigned int rate = config_.sampleRate;
+        if (snd_pcm_hw_params_set_rate_near(handle, hw, &rate, nullptr) < 0)
+            continue;
+        actualRate_ = rate;
 
-    // Channels
-    err = snd_pcm_hw_params_set_channels(handle, hw, channels);
-    if (err < 0) {
-        // Some devices only expose one channel count -- try what's available
-        unsigned int minCh = 0, maxCh = 0;
-        snd_pcm_hw_params_get_channels_min(hw, &minCh);
-        snd_pcm_hw_params_get_channels_max(hw, &maxCh);
-        channels = (isCapture ? config_.inputChannel + 1 : 2);
-        channels = std::max(channels, minCh);
-        channels = std::min(channels, maxCh);
-        err = snd_pcm_hw_params_set_channels(handle, hw, channels);
-        if (err < 0) {
-            errorMsg_ = std::string("Cannot set channels: ") + snd_strerror(err);
-            return false;
+        // Channels -- try requested count, fall back to min/max
+        if (snd_pcm_hw_params_set_channels(handle, hw, channels) < 0) {
+            unsigned int minCh = 1, maxCh = 2;
+            snd_pcm_hw_params_get_channels_min(hw, &minCh);
+            snd_pcm_hw_params_get_channels_max(hw, &maxCh);
+            channels = isCapture ? (unsigned int)(config_.inputChannel + 1) : 2u;
+            channels = std::max(channels, minCh);
+            channels = std::min(channels, maxCh);
+            if (snd_pcm_hw_params_set_channels(handle, hw, channels) < 0)
+                continue;
         }
-    }
-    if (isCapture)  captureChannels_  = channels;
-    else            playbackChannels_ = channels;
 
-    // Buffer/period size
-    snd_pcm_uframes_t periodSize = config_.bufferFrames;
-    err = snd_pcm_hw_params_set_period_size_near(handle, hw, &periodSize, nullptr);
-    if (err < 0) {
-        errorMsg_ = std::string("Cannot set period size: ") + snd_strerror(err);
+        // Period size
+        snd_pcm_uframes_t periodSize = config_.bufferFrames;
+        if (snd_pcm_hw_params_set_period_size_near(handle, hw, &periodSize, nullptr) < 0)
+            continue;
+
+        // Number of periods (buffer = periods * period_size)
+        unsigned int periods = config_.periods;
+        snd_pcm_hw_params_set_periods_near(handle, hw, &periods, nullptr);
+
+        // Commit
+        err = snd_pcm_hw_params(handle, hw);
+        if (err < 0) {
+            std::fprintf(stderr, "hw_params commit failed for %s with %s: %s\n",
+                         device.c_str(), f.name, snd_strerror(err));
+            continue;
+        }
+
+        fmt = f.our;
+        actualFrames_ = static_cast<unsigned int>(periodSize);
+        configured = true;
+
+        std::fprintf(stderr,
+            "ALSA %s: device=%s format=%s channels=%u rate=%u period=%u\n",
+            isCapture ? "capture " : "playback",
+            device.c_str(), f.name, channels, actualRate_, actualFrames_);
+        break;
+    }
+
+    if (!configured) {
+        errorMsg_ = std::string("Could not configure ") +
+                    (isCapture ? "capture" : "playback") +
+                    " device '" + device + "' with any supported format";
+        snd_pcm_close(handle);
+        handle = nullptr;
         return false;
     }
-    actualFrames_ = static_cast<unsigned int>(periodSize);
 
-    unsigned int periods = config_.periods;
-    err = snd_pcm_hw_params_set_periods_near(handle, hw, &periods, nullptr);
-    if (err < 0) {
-        errorMsg_ = std::string("Cannot set periods: ") + snd_strerror(err);
-        return false;
-    }
-
-    // Commit hw params
-    err = snd_pcm_hw_params(handle, hw);
-    if (err < 0) {
-        errorMsg_ = std::string("Cannot apply hw params: ") + snd_strerror(err);
-        return false;
-    }
-
-    // SW params: auto-start on first read/write
+    // SW params: start when the first period is written/read
     snd_pcm_sw_params_t* sw = nullptr;
     snd_pcm_sw_params_alloca(&sw);
     snd_pcm_sw_params_current(handle, sw);
-    snd_pcm_sw_params_set_start_threshold(handle, sw, periodSize);
-    snd_pcm_sw_params_set_avail_min(handle, sw, periodSize);
-    snd_pcm_sw_params(handle, sw);
-
-    return true;
-}
-
-bool AlsaAudioEngine::negotiateFormat(snd_pcm_t* handle, unsigned int /*channels*/,
-                                       SampleFormat& fmt)
-{
-    snd_pcm_hw_params_t* hw = nullptr;
-    snd_pcm_hw_params_alloca(&hw);
-    snd_pcm_hw_params_any(handle, hw);
-
-    // Probe in preference order: native float, then 32-bit int, then 16-bit int
-    const struct { snd_pcm_format_t alsa; SampleFormat fmt; } candidates[] = {
-        { SND_PCM_FORMAT_FLOAT_LE, SampleFormat::Float32 },
-        { SND_PCM_FORMAT_S32_LE,   SampleFormat::Int32   },
-        { SND_PCM_FORMAT_S16_LE,   SampleFormat::Int16   },
-    };
-
-    for (auto& c : candidates) {
-        if (snd_pcm_hw_params_test_format(handle, hw, c.alsa) == 0) {
-            int err = snd_pcm_hw_params_set_format(handle, hw, c.alsa);
-            if (err == 0) {
-                fmt = c.fmt;
-                return true;
-            }
-        }
+    snd_pcm_sw_params_set_start_threshold(handle, sw, actualFrames_);
+    snd_pcm_sw_params_set_avail_min(handle, sw, actualFrames_);
+    if (snd_pcm_sw_params(handle, sw) < 0) {
+        std::fprintf(stderr, "Warning: sw_params failed for %s\n", device.c_str());
     }
 
-    errorMsg_ = "No supported sample format found (tried FLOAT_LE, S32_LE, S16_LE)";
-    return false;
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -194,31 +209,29 @@ void AlsaAudioEngine::run()
         return;
     }
 
-    // Request SCHED_FIFO real-time priority. Best-effort: continue if denied.
+    // Request SCHED_FIFO real-time priority (best-effort)
     {
         struct sched_param sp{};
-        sp.sched_priority = 70;  // below kernel IRQ handlers (~90), above normal
+        sp.sched_priority = 70;
         if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp) != 0) {
             std::fprintf(stderr,
                 "Warning: could not set RT priority (SCHED_FIFO). "
-                "Run as root or configure /etc/security/limits.conf.\n");
+                "Run as root or add to 'audio' group with RT limits.\n");
         } else {
             std::fprintf(stderr, "RT priority set (SCHED_FIFO, priority 70).\n");
         }
     }
 
-    // Prepare both handles
-    snd_pcm_prepare(captureHandle_);
-    snd_pcm_prepare(playbackHandle_);
-
-    // Prime the playback buffer with silence to avoid underrun on first read
-    {
-        const int frames = static_cast<int>(actualFrames_);
-        std::memset(playbackRaw_.data(), 0, playbackRaw_.size());
-        for (unsigned int p = 0; p < config_.periods; ++p) {
-            snd_pcm_writei(playbackHandle_, playbackRaw_.data(), frames);
-        }
+    if (linked_) {
+        // Linked streams: prepare + start capture, playback starts automatically
+        snd_pcm_prepare(captureHandle_);
+    } else {
+        snd_pcm_prepare(captureHandle_);
+        snd_pcm_prepare(playbackHandle_);
     }
+
+    // Prime the playback buffer to prevent underrun before the first read
+    primePlayback();
 
     running_.store(true, std::memory_order_release);
 
@@ -232,42 +245,35 @@ void AlsaAudioEngine::run()
     while (running_.load(std::memory_order_acquire)) {
 
         // --- Capture ---
-        snd_pcm_sframes_t n = snd_pcm_readi(
-            captureHandle_, captureRaw_.data(), frames);
+        snd_pcm_sframes_t n = snd_pcm_readi(captureHandle_, captureRaw_.data(), frames);
 
-        if (n == -EPIPE || n == -ESTRPIPE) {
-            if (!recoverXrun(captureHandle_, static_cast<int>(n), "capture"))
-                break;
+        if (n < 0) {
+            std::fprintf(stderr, "Capture error: %s -- recovering\n", snd_strerror(static_cast<int>(n)));
+            if (!recoverBoth()) break;
             continue;
         }
-        if (n < 0) {
-            errorMsg_ = std::string("Capture error: ") + snd_strerror(static_cast<int>(n));
-            break;
-        }
-        if (n != frames) continue; // short read -- skip this block
 
-        // --- Convert capture: interleaved raw -> mono float ---
+        // Short read -- skip block, don't write garbage to output
+        if (n != frames) continue;
+
+        // --- Convert capture -> mono float ---
         deinterleaveCapture(captureRaw_.data(), monoBuffer_.data(),
                              frames, captureChannels_, config_.inputChannel);
 
-        // --- Process ---
+        // --- DSP ---
         callback_(monoBuffer_.data(), frames);
 
-        // --- Convert playback: mono float -> interleaved raw ---
+        // --- Convert mono float -> playback ---
         interleavePlayback(monoBuffer_.data(), playbackRaw_.data(),
                             frames, playbackChannels_, config_.outputChannels);
 
         // --- Playback ---
         n = snd_pcm_writei(playbackHandle_, playbackRaw_.data(), frames);
 
-        if (n == -EPIPE || n == -ESTRPIPE) {
-            if (!recoverXrun(playbackHandle_, static_cast<int>(n), "playback"))
-                break;
-            continue;
-        }
         if (n < 0) {
-            errorMsg_ = std::string("Playback error: ") + snd_strerror(static_cast<int>(n));
-            break;
+            std::fprintf(stderr, "Playback error: %s -- recovering\n", snd_strerror(static_cast<int>(n)));
+            if (!recoverBoth()) break;
+            continue;
         }
     }
 
@@ -287,6 +293,11 @@ void AlsaAudioEngine::close()
 {
     running_.store(false, std::memory_order_release);
 
+    if (linked_ && captureHandle_) {
+        snd_pcm_unlink(captureHandle_);
+        linked_ = false;
+    }
+
     if (captureHandle_) {
         snd_pcm_drop(captureHandle_);
         snd_pcm_close(captureHandle_);
@@ -300,32 +311,38 @@ void AlsaAudioEngine::close()
 }
 
 // ---------------------------------------------------------------------------
-// Xrun recovery
+// recoverBoth()
+// Recover both streams together to keep them in sync.
+// Re-primes playback to avoid immediate re-underrun.
 // ---------------------------------------------------------------------------
 
-bool AlsaAudioEngine::recoverXrun(snd_pcm_t* handle, int err, const char* side)
+bool AlsaAudioEngine::recoverBoth()
 {
-    std::fprintf(stderr, "ALSA xrun on %s (%s) -- recovering\n",
-                 side, snd_strerror(err));
+    // Try to resume from suspend first
+    int err = snd_pcm_recover(captureHandle_,  -EPIPE, /*silent=*/1);
+    if (err < 0) {
+        errorMsg_ = std::string("Capture recovery failed: ") + snd_strerror(err);
+        return false;
+    }
 
-    if (err == -EPIPE) {
-        int r = snd_pcm_prepare(handle);
-        if (r < 0) {
-            errorMsg_ = std::string("Xrun recovery failed on ")
-                      + side + ": " + snd_strerror(r);
-            return false;
-        }
-        return true;
+    err = snd_pcm_recover(playbackHandle_, -EPIPE, /*silent=*/1);
+    if (err < 0) {
+        errorMsg_ = std::string("Playback recovery failed: ") + snd_strerror(err);
+        return false;
     }
-    if (err == -ESTRPIPE) {
-        // Suspended -- wait for resume
-        int r;
-        while ((r = snd_pcm_resume(handle)) == -EAGAIN)
-            usleep(1000);
-        if (r < 0) snd_pcm_prepare(handle);
-        return true;
+
+    primePlayback();
+    return true;
+}
+
+void AlsaAudioEngine::primePlayback()
+{
+    // Write `periods` blocks of silence to fill the playback buffer
+    // before capture starts, so the output never starves on first block.
+    for (unsigned int p = 0; p < config_.periods; ++p) {
+        snd_pcm_writei(playbackHandle_, silenceRaw_.data(),
+                       static_cast<snd_pcm_uframes_t>(actualFrames_));
     }
-    return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -337,10 +354,11 @@ void AlsaAudioEngine::deinterleaveCapture(const void* raw, float* mono,
                                             int channel)
 {
     switch (captureFmt_) {
-        case SampleFormat::Float32: {
-            const float* src = static_cast<const float*>(raw);
+        case SampleFormat::Int16: {
+            const int16_t* src = static_cast<const int16_t*>(raw);
+            constexpr float kScale = 1.f / 32768.f;
             for (int i = 0; i < frames; ++i)
-                mono[i] = src[i * totalChannels + channel];
+                mono[i] = static_cast<float>(src[i * totalChannels + channel]) * kScale;
             break;
         }
         case SampleFormat::Int32: {
@@ -350,11 +368,10 @@ void AlsaAudioEngine::deinterleaveCapture(const void* raw, float* mono,
                 mono[i] = static_cast<float>(src[i * totalChannels + channel]) * kScale;
             break;
         }
-        case SampleFormat::Int16: {
-            const int16_t* src = static_cast<const int16_t*>(raw);
-            constexpr float kScale = 1.f / 32768.f;
+        case SampleFormat::Float32: {
+            const float* src = static_cast<const float*>(raw);
             for (int i = 0; i < frames; ++i)
-                mono[i] = static_cast<float>(src[i * totalChannels + channel]) * kScale;
+                mono[i] = src[i * totalChannels + channel];
             break;
         }
     }
@@ -365,33 +382,38 @@ void AlsaAudioEngine::interleavePlayback(const float* mono, void* raw,
                                           int channelMask)
 {
     switch (playbackFmt_) {
-        case SampleFormat::Float32: {
-            float* dst = static_cast<float*>(raw);
-            std::memset(dst, 0, static_cast<std::size_t>(frames) * totalChannels * sizeof(float));
-            for (int i = 0; i < frames; ++i)
-                for (int c = 0; c < totalChannels; ++c)
-                    if (channelMask & (1 << c))
-                        dst[i * totalChannels + c] = mono[i];
-            break;
-        }
-        case SampleFormat::Int32: {
-            int32_t* dst = static_cast<int32_t*>(raw);
-            std::memset(dst, 0, static_cast<std::size_t>(frames) * totalChannels * sizeof(int32_t));
-            constexpr float kScale = 2147483647.f;
-            for (int i = 0; i < frames; ++i)
-                for (int c = 0; c < totalChannels; ++c)
-                    if (channelMask & (1 << c))
-                        dst[i * totalChannels + c] = static_cast<int32_t>(mono[i] * kScale);
-            break;
-        }
         case SampleFormat::Int16: {
             int16_t* dst = static_cast<int16_t*>(raw);
-            std::memset(dst, 0, static_cast<std::size_t>(frames) * totalChannels * sizeof(int16_t));
+            std::memset(dst, 0,
+                static_cast<std::size_t>(frames) * totalChannels * sizeof(int16_t));
             constexpr float kScale = 32767.f;
             for (int i = 0; i < frames; ++i)
                 for (int c = 0; c < totalChannels; ++c)
                     if (channelMask & (1 << c))
-                        dst[i * totalChannels + c] = static_cast<int16_t>(mono[i] * kScale);
+                        dst[i * totalChannels + c] =
+                            static_cast<int16_t>(mono[i] * kScale);
+            break;
+        }
+        case SampleFormat::Int32: {
+            int32_t* dst = static_cast<int32_t*>(raw);
+            std::memset(dst, 0,
+                static_cast<std::size_t>(frames) * totalChannels * sizeof(int32_t));
+            constexpr float kScale = 2147483647.f;
+            for (int i = 0; i < frames; ++i)
+                for (int c = 0; c < totalChannels; ++c)
+                    if (channelMask & (1 << c))
+                        dst[i * totalChannels + c] =
+                            static_cast<int32_t>(mono[i] * kScale);
+            break;
+        }
+        case SampleFormat::Float32: {
+            float* dst = static_cast<float*>(raw);
+            std::memset(dst, 0,
+                static_cast<std::size_t>(frames) * totalChannels * sizeof(float));
+            for (int i = 0; i < frames; ++i)
+                for (int c = 0; c < totalChannels; ++c)
+                    if (channelMask & (1 << c))
+                        dst[i * totalChannels + c] = mono[i];
             break;
         }
     }
