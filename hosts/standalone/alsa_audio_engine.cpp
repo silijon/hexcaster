@@ -49,18 +49,6 @@ bool AlsaAudioEngine::open(const Config& config)
     if (!openHandle(config_.outputDevice, false, playbackHandle_, playbackChannels_, playbackFmt_))
         return false;
 
-    // Link handles when using the same device for synchronised start
-    if (config_.inputDevice == config_.outputDevice) {
-        int err = snd_pcm_link(captureHandle_, playbackHandle_);
-        if (err == 0) {
-            linked_ = true;
-        } else {
-            std::fprintf(stderr,
-                "Note: snd_pcm_link failed (%s) -- streams will start independently\n",
-                snd_strerror(err));
-        }
-    }
-
     // Pre-allocate raw interleaved buffers using actual negotiated format sizes
     const int frames = static_cast<int>(actualFrames_);
     captureRaw_.assign(
@@ -222,13 +210,9 @@ void AlsaAudioEngine::run()
         }
     }
 
-    if (linked_) {
-        // Linked streams: prepare + start capture, playback starts automatically
-        snd_pcm_prepare(captureHandle_);
-    } else {
-        snd_pcm_prepare(captureHandle_);
-        snd_pcm_prepare(playbackHandle_);
-    }
+    // Streams are always on separate devices -- prepare both independently.
+    snd_pcm_prepare(captureHandle_);
+    snd_pcm_prepare(playbackHandle_);
 
     // Prime the playback buffer to prevent underrun before the first read
     primePlayback();
@@ -293,11 +277,6 @@ void AlsaAudioEngine::close()
 {
     running_.store(false, std::memory_order_release);
 
-    if (linked_ && captureHandle_) {
-        snd_pcm_unlink(captureHandle_);
-        linked_ = false;
-    }
-
     if (captureHandle_) {
         snd_pcm_drop(captureHandle_);
         snd_pcm_close(captureHandle_);
@@ -318,16 +297,23 @@ void AlsaAudioEngine::close()
 
 bool AlsaAudioEngine::recoverBoth()
 {
-    // Try to resume from suspend first
-    int err = snd_pcm_recover(captureHandle_,  -EPIPE, /*silent=*/1);
+    // Drop both streams unconditionally -- safe from any PCM state,
+    // forces both handles back to SETUP.
+    snd_pcm_drop(captureHandle_);
+    snd_pcm_drop(playbackHandle_);
+
+    // Prepare both independently (streams are always on separate devices).
+    int err = snd_pcm_prepare(captureHandle_);
     if (err < 0) {
-        errorMsg_ = std::string("Capture recovery failed: ") + snd_strerror(err);
+        std::fprintf(stderr, "Capture prepare failed: %s\n", snd_strerror(err));
+        errorMsg_ = std::string("Capture prepare failed: ") + snd_strerror(err);
         return false;
     }
 
-    err = snd_pcm_recover(playbackHandle_, -EPIPE, /*silent=*/1);
+    err = snd_pcm_prepare(playbackHandle_);
     if (err < 0) {
-        errorMsg_ = std::string("Playback recovery failed: ") + snd_strerror(err);
+        std::fprintf(stderr, "Playback prepare failed: %s\n", snd_strerror(err));
+        errorMsg_ = std::string("Playback prepare failed: ") + snd_strerror(err);
         return false;
     }
 

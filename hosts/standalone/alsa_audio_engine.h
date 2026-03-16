@@ -15,9 +15,11 @@ namespace hexcaster {
 /**
  * AlsaAudioEngine: direct ALSA PCM backend.
  *
- * Opens separate capture and playback handles (which may point to the same
- * hardware device or different ones). Runs a blocking read/write loop on the
- * calling thread with optional SCHED_FIFO real-time priority.
+ * Opens separate capture and playback handles on independent devices.
+ * HexCaster always uses separate ADC (USB input) and DAC (amp board output)
+ * devices, so snd_pcm_link() is not used.
+ * Runs a blocking read/write loop on the calling thread with optional
+ * SCHED_FIFO real-time priority.
  *
  * Channel handling:
  *   - Capture: reads N-channel interleaved audio, extracts config.inputChannel
@@ -75,7 +77,6 @@ private:
 
     snd_pcm_t*    captureHandle_  = nullptr;
     snd_pcm_t*    playbackHandle_ = nullptr;
-    bool          linked_         = false;  // true if handles are snd_pcm_link'd
 
     Config        config_;
     SampleFormat  captureFmt_       = SampleFormat::Int16;
