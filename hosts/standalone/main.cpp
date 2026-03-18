@@ -1,10 +1,13 @@
 #include "audio_engine.h"
 #include "alsa_audio_engine.h"
+#include "midi_input.h"
 
 #include "hexcaster/pipeline.h"
 #include "hexcaster/gain_stage.h"
 #include "hexcaster/nam_stage.h"
 #include "hexcaster/param_registry.h"
+#include "hexcaster/midi_map.h"
+#include "hexcaster/param_id.h"
 
 #include <atomic>
 #include <csignal>
@@ -19,7 +22,7 @@
 #include <alsa/asoundlib.h>
 
 // ---------------------------------------------------------------------------
-// Signal handling -- Ctrl+C sets this flag, audio loop checks it
+// Signal handling -- Ctrl+C sets this flag, watcher thread calls engine.stop()
 // ---------------------------------------------------------------------------
 
 static std::atomic<bool> gQuit{ false };
@@ -33,16 +36,24 @@ static void handleSignal(int /*sig*/)
 // CLI argument parsing
 // ---------------------------------------------------------------------------
 
+struct MidiCcMapping {
+    uint8_t           cc;
+    hexcaster::ParamId paramId;
+};
+
 struct Args {
-    std::string inputDevice   = "hw:2,0";
-    std::string outputDevice  = "hw:2,0";
-    std::string modelPath;
-    unsigned int sampleRate   = 48000;
-    unsigned int bufferFrames = 128;
-    float        gainDb       = 0.f;
-    int          inputChannel = 0;   // 0=left, 1=right
-    bool         listDevices  = false;
-    bool         help         = false;
+    std::string  inputDevice    = "hw:2,0";
+    std::string  outputDevice   = "hw:2,0";
+    std::string  modelPath;
+    std::string  midiDevice;                    // empty = MIDI disabled
+    unsigned int sampleRate     = 48000;
+    unsigned int bufferFrames   = 128;
+    float        gainDb         = 0.f;
+    int          inputChannel   = 0;
+    bool         listDevices    = false;
+    bool         listMidi       = false;
+    bool         help           = false;
+    std::vector<MidiCcMapping> midiMappings;
 };
 
 static void printUsage(const char* prog)
@@ -51,22 +62,61 @@ static void printUsage(const char* prog)
         "Usage: %s --model <path.nam> [options]\n"
         "\n"
         "Options:\n"
-        "  --model <path>         Path to NAM model file (.nam)  [required]\n"
-        "  --device <hw:X,Y>      Set both input and output device  [default: hw:2,0]\n"
-        "  --input-device <hw:>   Input device (overrides --device)\n"
-        "  --output-device <hw:>  Output device (overrides --device)\n"
-        "  --sample-rate <Hz>     Sample rate  [default: 48000]\n"
-        "  --buffer <frames>      Buffer size in frames  [default: 128]\n"
-        "  --gain <dB>            Master gain in dB  [default: 0.0]\n"
-        "  --input-channel <N>    Capture channel index: 0=left, 1=right  [default: 0]\n"
-        "  --list-devices         Print ALSA PCM devices and exit\n"
-        "  --help                 Show this help and exit\n"
+        "  --model <path>              NAM model file (.nam)  [required]\n"
+        "  --device <hw:X,Y>           Set both input and output device\n"
+        "  --input-device <dev>        Input audio device\n"
+        "  --output-device <dev>       Output audio device\n"
+        "  --sample-rate <Hz>          Sample rate  [default: 48000]\n"
+        "  --buffer <frames>           Buffer size in frames  [default: 128]\n"
+        "  --gain <dB>                 Initial master gain in dB  [default: 0.0]\n"
+        "  --input-channel <N>         Capture channel: 0=left, 1=right  [default: 0]\n"
+        "  --midi-device <hw:X,Y,Z>    ALSA raw MIDI input device\n"
+        "  --midi-cc <cc>:<ParamName>  Map a MIDI CC to a parameter  (repeatable)\n"
+        "  --list-devices              Print ALSA PCM devices and exit\n"
+        "  --list-midi                 Print ALSA raw MIDI devices and exit\n"
+        "  --help                      Show this help and exit\n"
+        "\n"
+        "Parameter names for --midi-cc:\n"
+        "  MasterGain_dB   BloomBasePre_dB  BloomBasePost_dB\n"
+        "  BloomPreDepth   BloomPostDepth   EnvAttackMs  EnvReleaseMs\n"
+        "  EqBand1GainDb   EqBand2GainDb    EqBand3GainDb\n"
+        "  ReverbRoomSize  ReverbDamping    ReverbWet_Norm\n"
         "\n"
         "Examples:\n"
-        "  %s --model ~/models/amp.nam\n"
-        "  %s --model ~/amp.nam --device hw:1,0 --buffer 64\n"
-        "  %s --model ~/amp.nam --input-device hw:2,0 --output-device hw:3,0\n",
-        prog, prog, prog, prog);
+        "  %s --model ~/amp.nam --input-device hw:CARD=V276,DEV=0 \\\n"
+        "     --output-device hw:CARD=sndrpihifiberry,DEV=0\n"
+        "\n"
+        "  %s --model ~/amp.nam --input-device hw:CARD=V276,DEV=0 \\\n"
+        "     --output-device hw:CARD=sndrpihifiberry,DEV=0 \\\n"
+        "     --midi-device hw:1,0,0 \\\n"
+        "     --midi-cc 7:MasterGain_dB --midi-cc 1:BloomBasePre_dB\n",
+        prog, prog, prog);
+}
+
+static bool parseMidiCc(const char* arg, MidiCcMapping& out)
+{
+    // Expected format: "<cc>:<ParamName>"  e.g. "7:MasterGain_dB"
+    const char* colon = std::strchr(arg, ':');
+    if (!colon) {
+        std::fprintf(stderr, "Error: --midi-cc requires format <cc>:<ParamName>, got '%s'\n", arg);
+        return false;
+    }
+
+    const int cc = std::atoi(arg);
+    if (cc < 0 || cc > 127) {
+        std::fprintf(stderr, "Error: CC number must be 0-127, got %d\n", cc);
+        return false;
+    }
+
+    hexcaster::ParamId id;
+    if (!hexcaster::paramIdFromName(colon + 1, id)) {
+        std::fprintf(stderr, "Error: unknown parameter name '%s'\n", colon + 1);
+        return false;
+    }
+
+    out.cc      = static_cast<uint8_t>(cc);
+    out.paramId = id;
+    return true;
 }
 
 static bool parseArgs(int argc, char** argv, Args& args)
@@ -87,6 +137,11 @@ static bool parseArgs(int argc, char** argv, Args& args)
             args.listDevices = true;
             return true;
         }
+        if (std::strcmp(key, "--list-midi") == 0) {
+            args.listMidi = true;
+            return true;
+        }
+
         if (std::strcmp(key, "--model") == 0) {
             const char* v = nextArg(); if (!v) return false;
             args.modelPath = v;
@@ -111,6 +166,14 @@ static bool parseArgs(int argc, char** argv, Args& args)
         } else if (std::strcmp(key, "--input-channel") == 0) {
             const char* v = nextArg(); if (!v) return false;
             args.inputChannel = std::atoi(v);
+        } else if (std::strcmp(key, "--midi-device") == 0) {
+            const char* v = nextArg(); if (!v) return false;
+            args.midiDevice = v;
+        } else if (std::strcmp(key, "--midi-cc") == 0) {
+            const char* v = nextArg(); if (!v) return false;
+            MidiCcMapping mapping;
+            if (!parseMidiCc(v, mapping)) return false;
+            args.midiMappings.push_back(mapping);
         } else {
             std::fprintf(stderr, "Unknown option: %s\n", key);
             return false;
@@ -120,7 +183,7 @@ static bool parseArgs(int argc, char** argv, Args& args)
 }
 
 // ---------------------------------------------------------------------------
-// Device listing (handy for finding hw:X,Y numbers on the Pi)
+// Device listing
 // ---------------------------------------------------------------------------
 
 static void listAlsaDevices()
@@ -135,18 +198,32 @@ static void listAlsaDevices()
         char* name = snd_device_name_get_hint(*h, "NAME");
         char* desc = snd_device_name_get_hint(*h, "DESC");
         char* ioid = snd_device_name_get_hint(*h, "IOID");
-
-        // Only show hardware devices and those with no IOID filter (both)
         if (name && (ioid == nullptr ||
                      std::strcmp(ioid, "Input") == 0 ||
                      std::strcmp(ioid, "Output") == 0)) {
-            std::fprintf(stdout, "  %-30s %s\n",
-                         name, desc ? desc : "");
+            std::fprintf(stdout, "  %-30s %s\n", name, desc ? desc : "");
         }
+        free(name); free(desc); free(ioid);
+    }
+    snd_device_name_free_hint(hints);
+}
 
-        free(name);
-        free(desc);
-        free(ioid);
+static void listMidiDevices()
+{
+    std::fprintf(stdout, "ALSA raw MIDI devices:\n");
+    void** hints = nullptr;
+    if (snd_device_name_hint(-1, "rawmidi", &hints) < 0) {
+        std::fprintf(stderr, "  (failed to enumerate MIDI devices)\n");
+        return;
+    }
+    for (void** h = hints; *h; ++h) {
+        char* name = snd_device_name_get_hint(*h, "NAME");
+        char* desc = snd_device_name_get_hint(*h, "DESC");
+        char* ioid = snd_device_name_get_hint(*h, "IOID");
+        if (name && (ioid == nullptr || std::strcmp(ioid, "Input") == 0)) {
+            std::fprintf(stdout, "  %-30s %s\n", name, desc ? desc : "");
+        }
+        free(name); free(desc); free(ioid);
     }
     snd_device_name_free_hint(hints);
 }
@@ -165,14 +242,10 @@ int main(int argc, char** argv)
         printUsage(argv[0]);
         return 1;
     }
-    if (args.help) {
-        printUsage(argv[0]);
-        return 0;
-    }
-    if (args.listDevices) {
-        listAlsaDevices();
-        return 0;
-    }
+    if (args.help)        { printUsage(argv[0]);  return 0; }
+    if (args.listDevices) { listAlsaDevices();    return 0; }
+    if (args.listMidi)    { listMidiDevices();    return 0; }
+
     if (args.modelPath.empty()) {
         std::fprintf(stderr, "Error: --model is required.\n\n");
         printUsage(argv[0]);
@@ -180,11 +253,41 @@ int main(int argc, char** argv)
     }
 
     // -------------------------------------------------------------------------
-    // Build the DSP pipeline
+    // Parameter registry and MIDI map
     // -------------------------------------------------------------------------
 
     hexcaster::ParamRegistry params;
     params.set(hexcaster::ParamId::MasterGain_dB, args.gainDb);
+
+    hexcaster::MidiMap midiMap;
+    for (const auto& m : args.midiMappings) {
+        midiMap.map(m.cc, m.paramId);
+        // Find the param name for display (linear scan over the same table
+        // paramIdFromName uses -- only happens at startup, not in the audio path)
+        const char* paramName = "?";
+        struct { const char* n; hexcaster::ParamId id; } kNames[] = {
+            {"MasterGain_dB",    hexcaster::ParamId::MasterGain_dB},
+            {"BloomBasePre_dB",  hexcaster::ParamId::BloomBasePre_dB},
+            {"BloomBasePost_dB", hexcaster::ParamId::BloomBasePost_dB},
+            {"BloomPreDepth",    hexcaster::ParamId::BloomPreDepth},
+            {"BloomPostDepth",   hexcaster::ParamId::BloomPostDepth},
+            {"EnvAttackMs",      hexcaster::ParamId::EnvAttackMs},
+            {"EnvReleaseMs",     hexcaster::ParamId::EnvReleaseMs},
+            {"EqBand1GainDb",    hexcaster::ParamId::EqBand1GainDb},
+            {"EqBand2GainDb",    hexcaster::ParamId::EqBand2GainDb},
+            {"EqBand3GainDb",    hexcaster::ParamId::EqBand3GainDb},
+            {"ReverbRoomSize",   hexcaster::ParamId::ReverbRoomSize},
+            {"ReverbDamping",    hexcaster::ParamId::ReverbDamping},
+            {"ReverbWet_Norm",   hexcaster::ParamId::ReverbWet_Norm},
+        };
+        for (auto& e : kNames)
+            if (e.id == m.paramId) { paramName = e.n; break; }
+        std::fprintf(stdout, "MIDI: CC %d -> %s\n", m.cc, paramName);
+    }
+
+    // -------------------------------------------------------------------------
+    // DSP pipeline
+    // -------------------------------------------------------------------------
 
     hexcaster::GainStage masterGain;
     masterGain.setGainDb(args.gainDb);
@@ -200,19 +303,16 @@ int main(int argc, char** argv)
     std::fprintf(stdout, "Pipeline: %d stage(s)\n", pipeline.numStages());
 
     // -------------------------------------------------------------------------
-    // Load NAM model (blocking -- happens before audio engine starts)
+    // Load NAM model
     // -------------------------------------------------------------------------
 
     std::fprintf(stdout, "Loading model: %s\n", args.modelPath.c_str());
-    bool modelOk = nam.loadModel(args.modelPath);
-
-    if (!modelOk) {
-        std::fprintf(stderr, "Error: failed to load model '%s'\n",
-                     args.modelPath.c_str());
+    if (!nam.loadModel(args.modelPath)) {
+        std::fprintf(stderr, "Error: failed to load model '%s'\n", args.modelPath.c_str());
         return 1;
     }
 
-    // Trigger the pending swap by running one silent block (off-thread, safe here)
+    // Warm-up block: triggers the pending model swap before the audio thread starts
     {
         std::vector<float> warmup(args.bufferFrames, 0.f);
         pipeline.process(warmup.data(), static_cast<int>(args.bufferFrames));
@@ -221,49 +321,61 @@ int main(int argc, char** argv)
     std::fprintf(stdout, "Model loaded: %s\n", nam.modelPath().c_str());
 
     // -------------------------------------------------------------------------
-    // Open audio engine
+    // Audio engine
     // -------------------------------------------------------------------------
 
     hexcaster::AudioEngine::Config audioConfig;
-    audioConfig.inputDevice   = args.inputDevice;
-    audioConfig.outputDevice  = args.outputDevice;
-    audioConfig.sampleRate    = args.sampleRate;
-    audioConfig.bufferFrames  = args.bufferFrames;
-    audioConfig.periods       = 2;
-    audioConfig.inputChannel  = args.inputChannel;
-    audioConfig.outputChannels = 0x3;  // both L+R
+    audioConfig.inputDevice    = args.inputDevice;
+    audioConfig.outputDevice   = args.outputDevice;
+    audioConfig.sampleRate     = args.sampleRate;
+    audioConfig.bufferFrames   = args.bufferFrames;
+    audioConfig.periods        = 2;
+    audioConfig.inputChannel   = args.inputChannel;
+    audioConfig.outputChannels = 0x3;
 
     hexcaster::AlsaAudioEngine engine;
-
     if (!engine.open(audioConfig)) {
         std::fprintf(stderr, "Error: %s\n", engine.errorMessage().c_str());
         return 1;
     }
 
-    std::fprintf(stdout,
-        "Audio: in=%s out=%s rate=%u frames=%u\n",
+    std::fprintf(stdout, "Audio: in=%s out=%s rate=%u frames=%u\n",
         audioConfig.inputDevice.c_str(),
         audioConfig.outputDevice.c_str(),
         engine.actualSampleRate(),
         engine.actualBufferFrames());
 
-    // Warn if device negotiated a different buffer size than requested
     if (engine.actualBufferFrames() != args.bufferFrames) {
-        std::fprintf(stdout,
-            "Note: requested %u frames, device gave %u\n",
+        std::fprintf(stdout, "Note: requested %u frames, device gave %u\n",
             args.bufferFrames, engine.actualBufferFrames());
-        // Re-prepare pipeline with the actual frame count
         pipeline.prepare(static_cast<float>(engine.actualSampleRate()),
                          static_cast<int>(engine.actualBufferFrames()));
     }
 
-    // Wire the pipeline as the audio callback
+    // Audio callback: sync params -> stages each block, then process.
+    // Param reads are atomic; no locks in this path.
     engine.setCallback([&](float* buf, int n) {
+        masterGain.setGainDb(params.get(hexcaster::ParamId::MasterGain_dB));
         pipeline.process(buf, n);
     });
 
     // -------------------------------------------------------------------------
-    // Install signal handler and run
+    // MIDI input (optional)
+    // -------------------------------------------------------------------------
+
+    hexcaster::MidiInput midiInput;
+
+    if (!args.midiDevice.empty()) {
+        if (!midiInput.open(args.midiDevice)) {
+            std::fprintf(stderr, "Warning: %s\n  Continuing without MIDI.\n",
+                         midiInput.errorMessage().c_str());
+        } else {
+            midiInput.start(midiMap, params);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Signal handler + run
     // -------------------------------------------------------------------------
 
     std::signal(SIGINT,  handleSignal);
@@ -271,19 +383,21 @@ int main(int argc, char** argv)
 
     std::fprintf(stdout,
         "Running -- press Ctrl+C to stop.\n"
-        "Gain: %.1f dB  |  Input ch: %d  |  Output: L+R\n",
-        args.gainDb, args.inputChannel);
+        "Gain: %.1f dB  |  Input ch: %d  |  Output: L+R%s\n",
+        args.gainDb, args.inputChannel,
+        midiInput.isOpen() ? "  |  MIDI active" : "");
 
-    // Spin a watcher thread that calls engine.stop() when gQuit is set.
-    // This lets run() (which blocks) be interrupted cleanly without
-    // calling stop() from inside the signal handler.
     std::thread watcher([&]() {
         while (!gQuit.load(std::memory_order_relaxed))
-            usleep(50000);  // 50ms poll -- not RT, just for shutdown
+            usleep(50000);
         engine.stop();
     });
 
-    engine.run();  // blocks until stop() is called
+    engine.run();
+
+    // Shutdown sequence: stop MIDI before audio is fully torn down
+    midiInput.stop();
+    midiInput.close();
 
     watcher.join();
     engine.close();

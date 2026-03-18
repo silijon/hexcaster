@@ -39,6 +39,13 @@ public:
      */
     void resetToDefaults();
 
+    /**
+     * Get the min/max range for a parameter.
+     * Used by MidiMap to scale raw MIDI values to the parameter's range.
+     */
+    struct Range { float min; float max; };
+    Range getRange(ParamId id) const;
+
 private:
     static constexpr int kNumParams = static_cast<int>(ParamId::kCount);
 

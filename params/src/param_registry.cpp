@@ -75,4 +75,11 @@ void ParamRegistry::resetToDefaults()
     }
 }
 
+ParamRegistry::Range ParamRegistry::getRange(ParamId id) const
+{
+    const int i = static_cast<int>(id);
+    if (i < 0 || i >= kNumParams) return {0.f, 1.f};
+    return {kParamInfo[i].minValue, kParamInfo[i].maxValue};
+}
+
 } // namespace hexcaster

@@ -5,6 +5,7 @@
 add_library(hexcaster_params STATIC
   src/param_registry.cpp
   src/param_smoother.cpp
+  src/midi_map.cpp
 )
 
 target_include_directories(hexcaster_params

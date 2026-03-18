@@ -9,6 +9,7 @@ find_package(Threads REQUIRED)
 add_executable(hexcaster_standalone
   main.cpp
   alsa_audio_engine.cpp
+  midi_input.cpp
 )
 
 target_include_directories(hexcaster_standalone
