@@ -35,6 +35,11 @@ enum class ParamId : uint32_t {
     NoiseGateReleaseMs    = 52,  // Time to close once signal drops below threshold
     NoiseGateHoldMs       = 53,  // Minimum open time after signal drops below threshold
 
+    // --- Mid-Sweep EQ ---
+    EqGain_dB             = 60,  // Peaking filter boost/cut [-12, +12] dB
+    EqSweepHz             = 61,  // Center frequency [300, 2500] Hz
+    EqQ                   = 62,  // Bandwidth (Q factor) [0.3, 3.0], default 0.8
+
     kCount              // Always last
 };
 
@@ -58,6 +63,9 @@ inline bool paramIdFromName(std::string_view name, ParamId& out)
         { "NoiseGateAttackMs",      ParamId::NoiseGateAttackMs      },
         { "NoiseGateReleaseMs",     ParamId::NoiseGateReleaseMs     },
         { "NoiseGateHoldMs",        ParamId::NoiseGateHoldMs        },
+        { "EqGain_dB",              ParamId::EqGain_dB              },
+        { "EqSweepHz",              ParamId::EqSweepHz              },
+        { "EqQ",                    ParamId::EqQ                    },
     };
     for (auto& e : kTable) {
         if (e.name == name) { out = e.id; return true; }

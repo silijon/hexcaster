@@ -33,6 +33,11 @@ ParamRegistry::kParamInfo = []() {
     info[idx(ParamId::NoiseGateReleaseMs)]    = {  50.f,   5.f,  500.f };
     info[idx(ParamId::NoiseGateHoldMs)]       = {  50.f,   0.f,  500.f };
 
+    // Mid-Sweep EQ
+    info[idx(ParamId::EqGain_dB)]  = {    0.f, -12.f,  12.f };
+    info[idx(ParamId::EqSweepHz)]  = { 1000.f, 300.f, 2500.f };
+    info[idx(ParamId::EqQ)]        = {    0.8f,  0.3f,   3.f };
+
     return info;
 }();
 

@@ -6,6 +6,7 @@ add_library(hexcaster_components STATIC
   components/src/gain_stage.cpp
   components/src/nam_stage.cpp
   components/src/noise_gate.cpp
+  components/src/eq.cpp
 )
 
 target_include_directories(hexcaster_components

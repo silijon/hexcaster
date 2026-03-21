@@ -27,6 +27,7 @@
 #include "hexcaster/gain_stage.h"
 #include "hexcaster/nam_stage.h"
 #include "hexcaster/noise_gate.h"
+#include "hexcaster/eq.h"
 #include "hexcaster/param_registry.h"
 
 #include <lv2/atom/atom.h>
@@ -112,6 +113,7 @@ struct HexCasterLV2 {
     hexcaster::NoiseGate     noiseGate;
     hexcaster::GainStage     inputGain;
     hexcaster::NamStage      nam;
+    hexcaster::MidSweepEQ    eq;
     hexcaster::Pipeline      pipeline;
 
     explicit HexCasterLV2(double sampleRate, const LV2_Feature* const* features)
@@ -132,7 +134,8 @@ struct HexCasterLV2 {
 
         pipeline.addStage(&noiseGate);  // stage 0
         pipeline.addStage(&inputGain);  // stage 1
-        pipeline.addStage(&nam);         // stage 2
+        pipeline.addStage(&nam);        // stage 2
+        pipeline.addStage(&eq);         // stage 3
         pipeline.prepare(static_cast<float>(sampleRate), 4096);
     }
 
@@ -206,6 +209,10 @@ static void run(LV2_Handle instance, uint32_t sampleCount)
     if (self->inputGainCtl) {
         self->inputGain.setGainDb(*self->inputGainCtl);
     }
+
+    self->eq.setGainDb (self->params.get(hexcaster::ParamId::EqGain_dB));
+    self->eq.setSweepHz(self->params.get(hexcaster::ParamId::EqSweepHz));
+    self->eq.setQ      (self->params.get(hexcaster::ParamId::EqQ));
 
     // Model reload trigger: fire background load on 0 -> 1 rising edge only.
     if (self->modelReloadCtl) {
