@@ -25,6 +25,7 @@ enum class ParamId : uint32_t {
     BloomCompensation   = 3,  // Output compensation ratio on input reduction [0, 2]
     EnvAttackMs         = 4,  // Envelope follower attack time (ms)
     EnvReleaseMs        = 5,  // Envelope follower release time (ms)
+    BloomSensitivity_dB = 6,  // Detection signal gain before envelope follower (dB)
 
     // --- Input Gain ---
     InputGain_dB        = 30,
@@ -57,10 +58,11 @@ inline bool paramIdFromName(std::string_view name, ParamId& out)
     static constexpr Entry kTable[] = {
         { "BloomBasePre_dB",  ParamId::BloomBasePre_dB  },
         { "BloomBasePost_dB", ParamId::BloomBasePost_dB },
-        { "BloomDepth",       ParamId::BloomDepth       },
-        { "BloomCompensation",ParamId::BloomCompensation},
-        { "EnvAttackMs",      ParamId::EnvAttackMs      },
-        { "EnvReleaseMs",     ParamId::EnvReleaseMs     },
+        { "BloomDepth",           ParamId::BloomDepth           },
+        { "BloomCompensation",    ParamId::BloomCompensation    },
+        { "EnvAttackMs",          ParamId::EnvAttackMs          },
+        { "EnvReleaseMs",         ParamId::EnvReleaseMs         },
+        { "BloomSensitivity_dB",  ParamId::BloomSensitivity_dB  },
         { "InputGain_dB",     ParamId::InputGain_dB     },
         { "NoiseGateThreshold_dB",  ParamId::NoiseGateThreshold_dB  },
         { "NoiseGateAttackMs",      ParamId::NoiseGateAttackMs      },

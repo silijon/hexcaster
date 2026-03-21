@@ -93,7 +93,7 @@ static void printUsage(const char* prog)
         "\n"
         "Parameter names for --midi-cc:\n"
         "  InputGain_dB         BloomBasePre_dB    BloomBasePost_dB\n"
-        "  BloomDepth  BloomCompensation  EnvAttackMs  EnvReleaseMs\n"
+        "  BloomDepth  BloomCompensation  BloomSensitivity_dB  EnvAttackMs  EnvReleaseMs\n"
         "  NoiseGateThreshold_dB  NoiseGateAttackMs  NoiseGateReleaseMs  NoiseGateHoldMs\n"
         "  EqGain_dB  EqSweepHz  EqQ  MasterVolume_dB\n"
         "\n"
@@ -312,6 +312,7 @@ int main(int argc, char** argv)
             {"BloomCompensation",     hexcaster::ParamId::BloomCompensation},
             {"EnvAttackMs",           hexcaster::ParamId::EnvAttackMs},
             {"EnvReleaseMs",          hexcaster::ParamId::EnvReleaseMs},
+            {"BloomSensitivity_dB",   hexcaster::ParamId::BloomSensitivity_dB},
             {"NoiseGateThreshold_dB", hexcaster::ParamId::NoiseGateThreshold_dB},
             {"NoiseGateAttackMs",     hexcaster::ParamId::NoiseGateAttackMs},
             {"NoiseGateReleaseMs",    hexcaster::ParamId::NoiseGateReleaseMs},
@@ -439,6 +440,7 @@ int main(int argc, char** argv)
         bloom.setCompensation   (params.get(hexcaster::ParamId::BloomCompensation));
         bloom.setAttackMs       (params.get(hexcaster::ParamId::EnvAttackMs));
         bloom.setReleaseMs      (params.get(hexcaster::ParamId::EnvReleaseMs));
+        bloom.setSensitivity    (params.get(hexcaster::ParamId::BloomSensitivity_dB));
         eq.setGainDb            (params.get(hexcaster::ParamId::EqGain_dB));
         eq.setSweepHz           (params.get(hexcaster::ParamId::EqSweepHz));
         eq.setQ                 (params.get(hexcaster::ParamId::EqQ));

@@ -75,6 +75,7 @@ public:
     void setCompensation(float ratio);
     void setAttackMs(float ms);
     void setReleaseMs(float ms);
+    void setSensitivity(float db);  // detection signal gain [0, 40] dB
 
 private:
     GainStage& preGain_;
@@ -87,6 +88,7 @@ private:
     std::atomic<float> compensation_ { 0.5f  };
     std::atomic<float> attackMs_     { 5.f   };
     std::atomic<float> releaseMs_    { 100.f };
+    std::atomic<float> sensitivity_  { 20.f  }; // dB
 
     // --- Audio thread state ---
     float sampleRate_ = 48000.f;

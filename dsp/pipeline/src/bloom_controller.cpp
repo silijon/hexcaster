@@ -48,6 +48,8 @@ void BloomController::preProcess(const float* buffer, int numSamples)
     const float compensation = compensation_.load(std::memory_order_relaxed);
     const float attackMs     = attackMs_.load(std::memory_order_relaxed);
     const float releaseMs    = releaseMs_.load(std::memory_order_relaxed);
+    const float sensitivityLin = std::pow(10.f,
+        sensitivity_.load(std::memory_order_relaxed) / 20.f);
 
     // Recompute EMA coefficients if attack/release changed
     if (attackMs != cachedAttackMs_ || releaseMs != cachedReleaseMs_) {
@@ -68,8 +70,10 @@ void BloomController::preProcess(const float* buffer, int numSamples)
         hpfX1_ = x;
         hpfY1_ = hpfOut;
 
-        // Peak envelope follower
-        const float absSample = hpfOut < 0.f ? -hpfOut : hpfOut;
+        // Peak envelope follower -- sensitivity scales the detection signal
+        // only, not the audio path. This normalises the raw ADC amplitude
+        // to a useful [0, 1] working range for the gain formulas.
+        const float absSample = (hpfOut < 0.f ? -hpfOut : hpfOut) * sensitivityLin;
         if (absSample > env) {
             // Attack: snap toward peak (fast EMA)
             env = attackCoeff_ * env + (1.f - attackCoeff_) * absSample;
@@ -136,6 +140,11 @@ void BloomController::setAttackMs(float ms)
 void BloomController::setReleaseMs(float ms)
 {
     releaseMs_.store(std::clamp(ms, 1.f, 5000.f), std::memory_order_relaxed);
+}
+
+void BloomController::setSensitivity(float db)
+{
+    sensitivity_.store(std::clamp(db, 0.f, 40.f), std::memory_order_relaxed);
 }
 
 // ---------------------------------------------------------------------------
