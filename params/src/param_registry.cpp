@@ -24,24 +24,8 @@ ParamRegistry::kParamInfo = []() {
     info[idx(ParamId::EnvAttackMs)]      = { 5.f,    0.1f, 500.f };
     info[idx(ParamId::EnvReleaseMs)]     = {100.f,   1.f, 5000.f };
 
-    // Post-EQ
-    info[idx(ParamId::EqBand1Freq)]      = { 100.f,  20.f, 20000.f };
-    info[idx(ParamId::EqBand1GainDb)]    = {   0.f, -24.f,    24.f };
-    info[idx(ParamId::EqBand1Q)]         = {   1.f,  0.1f,    10.f };
-    info[idx(ParamId::EqBand2Freq)]      = {1000.f,  20.f, 20000.f };
-    info[idx(ParamId::EqBand2GainDb)]    = {   0.f, -24.f,    24.f };
-    info[idx(ParamId::EqBand2Q)]         = {   1.f,  0.1f,    10.f };
-    info[idx(ParamId::EqBand3Freq)]      = {8000.f,  20.f, 20000.f };
-    info[idx(ParamId::EqBand3GainDb)]    = {   0.f, -24.f,    24.f };
-    info[idx(ParamId::EqBand3Q)]         = {   1.f,  0.1f,    10.f };
-
     // Input Gain
     info[idx(ParamId::InputGain_dB)]     = {   0.f, -60.f,   24.f };
-
-    // Reverb
-    info[idx(ParamId::ReverbRoomSize)]   = { 0.5f,   0.f,    1.f };
-    info[idx(ParamId::ReverbDamping)]    = { 0.5f,   0.f,    1.f };
-    info[idx(ParamId::ReverbWet_Norm)]   = { 0.0f,   0.f,    1.f };
 
     // Noise Gate
     info[idx(ParamId::NoiseGateThreshold_dB)] = { -60.f, -80.f,   0.f };

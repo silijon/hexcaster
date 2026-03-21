@@ -26,24 +26,8 @@ enum class ParamId : uint32_t {
     EnvAttackMs         = 4,
     EnvReleaseMs        = 5,
 
-    // --- Post-distortion EQ ---
-    EqBand1Freq         = 10,
-    EqBand1GainDb       = 11,
-    EqBand1Q            = 12,
-    EqBand2Freq         = 13,
-    EqBand2GainDb       = 14,
-    EqBand2Q            = 15,
-    EqBand3Freq         = 16,
-    EqBand3GainDb       = 17,
-    EqBand3Q            = 18,
-
     // --- Input Gain ---
     InputGain_dB        = 30,
-
-    // --- Reverb ---
-    ReverbRoomSize      = 40,
-    ReverbDamping       = 41,
-    ReverbWet_Norm      = 42,
 
     // --- Noise Gate ---
     NoiseGateThreshold_dB = 50,  // Gate opens above this level [-80, 0] dB
@@ -69,19 +53,7 @@ inline bool paramIdFromName(std::string_view name, ParamId& out)
         { "BloomPostDepth",   ParamId::BloomPostDepth   },
         { "EnvAttackMs",      ParamId::EnvAttackMs      },
         { "EnvReleaseMs",     ParamId::EnvReleaseMs     },
-        { "EqBand1Freq",      ParamId::EqBand1Freq      },
-        { "EqBand1GainDb",    ParamId::EqBand1GainDb    },
-        { "EqBand1Q",         ParamId::EqBand1Q         },
-        { "EqBand2Freq",      ParamId::EqBand2Freq      },
-        { "EqBand2GainDb",    ParamId::EqBand2GainDb    },
-        { "EqBand2Q",         ParamId::EqBand2Q         },
-        { "EqBand3Freq",      ParamId::EqBand3Freq      },
-        { "EqBand3GainDb",    ParamId::EqBand3GainDb    },
-        { "EqBand3Q",         ParamId::EqBand3Q         },
         { "InputGain_dB",     ParamId::InputGain_dB     },
-        { "ReverbRoomSize",         ParamId::ReverbRoomSize         },
-        { "ReverbDamping",          ParamId::ReverbDamping          },
-        { "ReverbWet_Norm",         ParamId::ReverbWet_Norm         },
         { "NoiseGateThreshold_dB",  ParamId::NoiseGateThreshold_dB  },
         { "NoiseGateAttackMs",      ParamId::NoiseGateAttackMs      },
         { "NoiseGateReleaseMs",     ParamId::NoiseGateReleaseMs     },

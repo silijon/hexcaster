@@ -83,7 +83,6 @@ static void printUsage(const char* prog)
         "  InputGain_dB         BloomBasePre_dB    BloomBasePost_dB\n"
         "  BloomPreDepth        BloomPostDepth     EnvAttackMs  EnvReleaseMs\n"
         "  NoiseGateThreshold_dB  NoiseGateAttackMs  NoiseGateReleaseMs  NoiseGateHoldMs\n"
-        "  EqBand1GainDb        EqBand2GainDb      EqBand3GainDb\n"
         "\n"
         "Examples:\n"
         "  %s --model ~/amp.nam --input-device hw:CARD=V276,DEV=0 \\\n"
@@ -284,12 +283,6 @@ int main(int argc, char** argv)
             {"NoiseGateAttackMs",     hexcaster::ParamId::NoiseGateAttackMs},
             {"NoiseGateReleaseMs",    hexcaster::ParamId::NoiseGateReleaseMs},
             {"NoiseGateHoldMs",       hexcaster::ParamId::NoiseGateHoldMs},
-            {"EqBand1GainDb",         hexcaster::ParamId::EqBand1GainDb},
-            {"EqBand2GainDb",         hexcaster::ParamId::EqBand2GainDb},
-            {"EqBand3GainDb",         hexcaster::ParamId::EqBand3GainDb},
-            {"ReverbRoomSize",        hexcaster::ParamId::ReverbRoomSize},
-            {"ReverbDamping",         hexcaster::ParamId::ReverbDamping},
-            {"ReverbWet_Norm",        hexcaster::ParamId::ReverbWet_Norm},
         };
         for (auto& e : kNames)
             if (e.id == m.paramId) { paramName = e.n; break; }
