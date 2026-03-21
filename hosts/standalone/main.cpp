@@ -54,6 +54,7 @@ struct Args {
     float        gateThresholdDb      = -60.f;
     float        eqGainDb             = 0.f;
     float        eqSweepHz            = 1000.f;
+    float        masterVolumeDb       = 0.f;
     int          inputChannel         = 0;
     bool         listDevices    = false;
     bool         listMidi       = false;
@@ -77,6 +78,7 @@ static void printUsage(const char* prog)
         "  --gate-threshold <dB>       Noise gate threshold  [-80, 0] dB  [default: -60]\n"
         "  --eq-gain <dB>              Post-NAM EQ gain  [-12, +12] dB  [default: 0]\n"
         "  --eq-sweep <Hz>             Post-NAM EQ center frequency  [300, 2500] Hz  [default: 1000]\n"
+        "  --master-volume <dB>        Final output level to power amp  [-60, +24] dB  [default: 0]\n"
         "  --input-channel <N>         Capture channel: 0=left, 1=right  [default: 0]\n"
         "  --midi-device <hw:X,Y,Z>    ALSA raw MIDI input device\n"
         "  --midi-cc <cc>:<ParamName>  Map a MIDI CC to a parameter  (repeatable)\n"
@@ -88,7 +90,7 @@ static void printUsage(const char* prog)
         "  InputGain_dB         BloomBasePre_dB    BloomBasePost_dB\n"
         "  BloomPreDepth        BloomPostDepth     EnvAttackMs  EnvReleaseMs\n"
         "  NoiseGateThreshold_dB  NoiseGateAttackMs  NoiseGateReleaseMs  NoiseGateHoldMs\n"
-        "  EqGain_dB  EqSweepHz  EqQ\n"
+        "  EqGain_dB  EqSweepHz  EqQ  MasterVolume_dB\n"
         "\n"
         "Examples:\n"
         "  %s --model ~/amp.nam --input-device hw:CARD=V276,DEV=0 \\\n"
@@ -180,6 +182,9 @@ static bool parseArgs(int argc, char** argv, Args& args)
         } else if (std::strcmp(key, "--eq-sweep") == 0) {
             const char* v = nextArg(); if (!v) return false;
             args.eqSweepHz = static_cast<float>(std::atof(v));
+        } else if (std::strcmp(key, "--master-volume") == 0) {
+            const char* v = nextArg(); if (!v) return false;
+            args.masterVolumeDb = static_cast<float>(std::atof(v));
         } else if (std::strcmp(key, "--input-channel") == 0) {
             const char* v = nextArg(); if (!v) return false;
             args.inputChannel = std::atoi(v);
@@ -278,6 +283,7 @@ int main(int argc, char** argv)
     params.set(hexcaster::ParamId::NoiseGateThreshold_dB, args.gateThresholdDb);
     params.set(hexcaster::ParamId::EqGain_dB,             args.eqGainDb);
     params.set(hexcaster::ParamId::EqSweepHz,             args.eqSweepHz);
+    params.set(hexcaster::ParamId::MasterVolume_dB,       args.masterVolumeDb);
 
     hexcaster::MidiMap midiMap;
     for (const auto& m : args.midiMappings) {
@@ -300,6 +306,7 @@ int main(int argc, char** argv)
             {"EqGain_dB",             hexcaster::ParamId::EqGain_dB},
             {"EqSweepHz",             hexcaster::ParamId::EqSweepHz},
             {"EqQ",                   hexcaster::ParamId::EqQ},
+            {"MasterVolume_dB",       hexcaster::ParamId::MasterVolume_dB},
         };
         for (auto& e : kNames)
             if (e.id == m.paramId) { paramName = e.n; break; }
@@ -322,11 +329,15 @@ int main(int argc, char** argv)
     eq.setGainDb (args.eqGainDb);
     eq.setSweepHz(args.eqSweepHz);
 
+    hexcaster::GainStage masterVolume;
+    masterVolume.setGainDb(args.masterVolumeDb);
+
     hexcaster::Pipeline pipeline;
-    pipeline.addStage(&noiseGate);  // stage 0: noise gate
-    pipeline.addStage(&inputGain);  // stage 1: input gain
-    pipeline.addStage(&nam);        // stage 2: amp model
-    pipeline.addStage(&eq);         // stage 3: post-NAM EQ
+    pipeline.addStage(&noiseGate);    // stage 0: noise gate
+    pipeline.addStage(&inputGain);    // stage 1: input gain
+    pipeline.addStage(&nam);          // stage 2: amp model
+    pipeline.addStage(&eq);           // stage 3: post-NAM EQ
+    pipeline.addStage(&masterVolume); // stage 4: master volume
     pipeline.prepare(static_cast<float>(args.sampleRate),
                      static_cast<int>(args.bufferFrames));
 
@@ -391,9 +402,10 @@ int main(int argc, char** argv)
         noiseGate.setReleaseMs  (params.get(hexcaster::ParamId::NoiseGateReleaseMs));
         noiseGate.setHoldMs     (params.get(hexcaster::ParamId::NoiseGateHoldMs));
         inputGain.setGainDb     (params.get(hexcaster::ParamId::InputGain_dB));
-        eq.setGainDb  (params.get(hexcaster::ParamId::EqGain_dB));
-        eq.setSweepHz (params.get(hexcaster::ParamId::EqSweepHz));
-        eq.setQ       (params.get(hexcaster::ParamId::EqQ));
+        eq.setGainDb      (params.get(hexcaster::ParamId::EqGain_dB));
+        eq.setSweepHz     (params.get(hexcaster::ParamId::EqSweepHz));
+        eq.setQ           (params.get(hexcaster::ParamId::EqQ));
+        masterVolume.setGainDb(params.get(hexcaster::ParamId::MasterVolume_dB));
         pipeline.process(buf, n);
     });
 

@@ -40,6 +40,9 @@ enum class ParamId : uint32_t {
     EqSweepHz             = 61,  // Center frequency [300, 2500] Hz
     EqQ                   = 62,  // Bandwidth (Q factor) [0.3, 3.0], default 0.8
 
+    // --- Master Volume ---
+    MasterVolume_dB       = 70,  // Final output level before power amp [-60, +24] dB
+
     kCount              // Always last
 };
 
@@ -66,6 +69,7 @@ inline bool paramIdFromName(std::string_view name, ParamId& out)
         { "EqGain_dB",              ParamId::EqGain_dB              },
         { "EqSweepHz",              ParamId::EqSweepHz              },
         { "EqQ",                    ParamId::EqQ                    },
+        { "MasterVolume_dB",        ParamId::MasterVolume_dB        },
     };
     for (auto& e : kTable) {
         if (e.name == name) { out = e.id; return true; }

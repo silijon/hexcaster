@@ -114,6 +114,7 @@ struct HexCasterLV2 {
     hexcaster::GainStage     inputGain;
     hexcaster::NamStage      nam;
     hexcaster::MidSweepEQ    eq;
+    hexcaster::GainStage     masterVolume;
     hexcaster::Pipeline      pipeline;
 
     explicit HexCasterLV2(double sampleRate, const LV2_Feature* const* features)
@@ -132,10 +133,11 @@ struct HexCasterLV2 {
         noiseGate.setThresholdDb(params.get(hexcaster::ParamId::NoiseGateThreshold_dB));
         inputGain.setGainDb(params.get(hexcaster::ParamId::InputGain_dB));
 
-        pipeline.addStage(&noiseGate);  // stage 0
-        pipeline.addStage(&inputGain);  // stage 1
-        pipeline.addStage(&nam);        // stage 2
-        pipeline.addStage(&eq);         // stage 3
+        pipeline.addStage(&noiseGate);    // stage 0
+        pipeline.addStage(&inputGain);    // stage 1
+        pipeline.addStage(&nam);          // stage 2
+        pipeline.addStage(&eq);           // stage 3
+        pipeline.addStage(&masterVolume); // stage 4
         pipeline.prepare(static_cast<float>(sampleRate), 4096);
     }
 
@@ -213,6 +215,7 @@ static void run(LV2_Handle instance, uint32_t sampleCount)
     self->eq.setGainDb (self->params.get(hexcaster::ParamId::EqGain_dB));
     self->eq.setSweepHz(self->params.get(hexcaster::ParamId::EqSweepHz));
     self->eq.setQ      (self->params.get(hexcaster::ParamId::EqQ));
+    self->masterVolume.setGainDb(self->params.get(hexcaster::ParamId::MasterVolume_dB));
 
     // Model reload trigger: fire background load on 0 -> 1 rising edge only.
     if (self->modelReloadCtl) {

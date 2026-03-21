@@ -38,6 +38,9 @@ ParamRegistry::kParamInfo = []() {
     info[idx(ParamId::EqSweepHz)]  = { 1000.f, 300.f, 2500.f };
     info[idx(ParamId::EqQ)]        = {    0.8f,  0.3f,   3.f };
 
+    // Master Volume
+    info[idx(ParamId::MasterVolume_dB)] = { 0.f, -60.f, 24.f };
+
     return info;
 }();
 
