@@ -43,6 +43,12 @@ ParamRegistry::kParamInfo = []() {
     info[idx(ParamId::ReverbDamping)]    = { 0.5f,   0.f,    1.f };
     info[idx(ParamId::ReverbWet_Norm)]   = { 0.0f,   0.f,    1.f };
 
+    // Noise Gate
+    info[idx(ParamId::NoiseGateThreshold_dB)] = { -60.f, -80.f,   0.f };
+    info[idx(ParamId::NoiseGateAttackMs)]     = {   0.5f,  0.1f,  10.f };
+    info[idx(ParamId::NoiseGateReleaseMs)]    = {  50.f,   5.f,  500.f };
+    info[idx(ParamId::NoiseGateHoldMs)]       = {  50.f,   0.f,  500.f };
+
     return info;
 }();
 

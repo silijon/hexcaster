@@ -26,6 +26,7 @@
 #include "hexcaster/pipeline.h"
 #include "hexcaster/gain_stage.h"
 #include "hexcaster/nam_stage.h"
+#include "hexcaster/noise_gate.h"
 #include "hexcaster/param_registry.h"
 
 #include <lv2/atom/atom.h>
@@ -43,25 +44,6 @@
 
 #define HEXCASTER_URI       "urn:hexcaster:hexcaster"
 #define HEXCASTER_MODEL_URI "urn:hexcaster:model_path"
-
-// Debug log -- writes to a file so we can trace LV2 lifecycle.
-// Remove once model loading is confirmed working.
-#include <cstdarg>
-#include <cstdio>
-static FILE* dbgFile = nullptr;
-static void dbg(const char* fmt, ...) {
-    if (!dbgFile) {
-        const char* home = std::getenv("HOME");
-        std::string p = std::string(home ? home : "/tmp") + "/.config/hexcaster/debug.log";
-        dbgFile = std::fopen(p.c_str(), "w");
-        if (!dbgFile) return;
-    }
-    va_list args;
-    va_start(args, fmt);
-    std::vfprintf(dbgFile, fmt, args);
-    va_end(args);
-    std::fflush(dbgFile);
-}
 
 namespace {
 
@@ -127,6 +109,7 @@ struct HexCasterLV2 {
 
     // DSP
     hexcaster::ParamRegistry params;
+    hexcaster::NoiseGate     noiseGate;
     hexcaster::GainStage     masterGain;
     hexcaster::NamStage      nam;
     hexcaster::Pipeline      pipeline;
@@ -144,14 +127,13 @@ struct HexCasterLV2 {
             uridModelUri = uridMap->map(uridMap->handle, HEXCASTER_MODEL_URI);
         }
 
+        noiseGate.setThresholdDb(params.get(hexcaster::ParamId::NoiseGateThreshold_dB));
         masterGain.setGainDb(params.get(hexcaster::ParamId::MasterGain_dB));
 
-        pipeline.addStage(&masterGain);
-        pipeline.addStage(&nam);
+        pipeline.addStage(&noiseGate);   // stage 0
+        pipeline.addStage(&masterGain);  // stage 1
+        pipeline.addStage(&nam);         // stage 2
         pipeline.prepare(static_cast<float>(sampleRate), 4096);
-
-        dbg("instantiate: sampleRate=%.0f, pipeline stages=%d\n",
-            sampleRate, pipeline.numStages());
     }
 
     ~HexCasterLV2()
@@ -164,13 +146,9 @@ struct HexCasterLV2 {
     // Spawn a background thread to load the model. Safe to call from run().
     void triggerLoad(const std::string& path)
     {
-        dbg("triggerLoad: path='%s'\n", path.c_str());
-
         // If a previous load is still in flight, let it finish first.
-        if (loaderThread_.joinable()) {
-            dbg("triggerLoad: joining previous loader thread\n");
+        if (loaderThread_.joinable())
             loaderThread_.join();
-        }
 
         pendingLoadPath_ = path;
         loadComplete_.store(false, std::memory_order_release);
@@ -178,11 +156,7 @@ struct HexCasterLV2 {
 
         loaderThread_ = std::thread([this]() {
             const std::string p = pendingLoadPath_;
-            dbg("loader thread: loading '%s'\n", p.c_str());
-            bool ok = nam.loadModel(p);
-            dbg("loader thread: loadModel returned %s, hasModel=%s\n",
-                ok ? "true" : "false",
-                nam.hasModel() ? "yes" : "no");
+            nam.loadModel(p);
             loadComplete_.store(true, std::memory_order_release);
         });
     }
@@ -225,7 +199,10 @@ static void run(LV2_Handle instance, uint32_t sampleCount)
     auto* self = static_cast<HexCasterLV2*>(instance);
     if (!self->audioIn || !self->audioOut) return;
 
-    // Master gain -- read each block, GainStage smooths per-sample.
+    // Sync params -> stages each block. Reads are atomic; no locks.
+    self->noiseGate.setThresholdDb(
+        self->params.get(hexcaster::ParamId::NoiseGateThreshold_dB));
+
     if (self->masterGainCtl) {
         self->masterGain.setGainDb(*self->masterGainCtl);
     }
@@ -234,10 +211,7 @@ static void run(LV2_Handle instance, uint32_t sampleCount)
     if (self->modelReloadCtl) {
         const float cur = *self->modelReloadCtl;
         if (cur >= 0.5f && self->prevReloadValue < 0.5f) {
-            dbg("run: reload edge detected (%.2f -> %.2f)\n",
-                self->prevReloadValue, cur);
             const std::string path = readSidecar();
-            dbg("run: sidecar path='%s'\n", path.c_str());
             if (!path.empty()) {
                 self->triggerLoad(path);
             }
@@ -248,17 +222,6 @@ static void run(LV2_Handle instance, uint32_t sampleCount)
     // Copy input -> output, then process in-place.
     std::memcpy(self->audioOut, self->audioIn, sampleCount * sizeof(float));
     self->pipeline.process(self->audioOut, static_cast<int>(sampleCount));
-
-    // Log first few blocks after model becomes active
-    static int logCount = 0;
-    if (self->nam.hasModel() && logCount < 5) {
-        float maxSample = 0.f;
-        for (uint32_t i = 0; i < sampleCount; ++i)
-            if (self->audioOut[i] > maxSample) maxSample = self->audioOut[i];
-        dbg("run: model active, block %d, sampleCount=%u, maxOut=%.6f\n",
-            logCount, sampleCount, maxSample);
-        ++logCount;
-    }
 }
 
 static void deactivate(LV2_Handle /*instance*/) {}

@@ -45,6 +45,12 @@ enum class ParamId : uint32_t {
     ReverbDamping       = 41,
     ReverbWet_Norm      = 42,
 
+    // --- Noise Gate ---
+    NoiseGateThreshold_dB = 50,  // Gate opens above this level [-80, 0] dB
+    NoiseGateAttackMs     = 51,  // Time to open once signal exceeds threshold
+    NoiseGateReleaseMs    = 52,  // Time to close once signal drops below threshold
+    NoiseGateHoldMs       = 53,  // Minimum open time after signal drops below threshold
+
     kCount              // Always last
 };
 
@@ -73,9 +79,13 @@ inline bool paramIdFromName(std::string_view name, ParamId& out)
         { "EqBand3GainDb",    ParamId::EqBand3GainDb    },
         { "EqBand3Q",         ParamId::EqBand3Q         },
         { "MasterGain_dB",    ParamId::MasterGain_dB    },
-        { "ReverbRoomSize",   ParamId::ReverbRoomSize   },
-        { "ReverbDamping",    ParamId::ReverbDamping    },
-        { "ReverbWet_Norm",   ParamId::ReverbWet_Norm   },
+        { "ReverbRoomSize",         ParamId::ReverbRoomSize         },
+        { "ReverbDamping",          ParamId::ReverbDamping          },
+        { "ReverbWet_Norm",         ParamId::ReverbWet_Norm         },
+        { "NoiseGateThreshold_dB",  ParamId::NoiseGateThreshold_dB  },
+        { "NoiseGateAttackMs",      ParamId::NoiseGateAttackMs      },
+        { "NoiseGateReleaseMs",     ParamId::NoiseGateReleaseMs     },
+        { "NoiseGateHoldMs",        ParamId::NoiseGateHoldMs        },
     };
     for (auto& e : kTable) {
         if (e.name == name) { out = e.id; return true; }

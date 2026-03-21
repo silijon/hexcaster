@@ -5,6 +5,7 @@
 #include "hexcaster/pipeline.h"
 #include "hexcaster/gain_stage.h"
 #include "hexcaster/nam_stage.h"
+#include "hexcaster/noise_gate.h"
 #include "hexcaster/param_registry.h"
 #include "hexcaster/midi_map.h"
 #include "hexcaster/param_id.h"
@@ -48,8 +49,9 @@ struct Args {
     std::string  midiDevice;                    // empty = MIDI disabled
     unsigned int sampleRate     = 48000;
     unsigned int bufferFrames   = 128;
-    float        gainDb         = 0.f;
-    int          inputChannel   = 0;
+    float        gainDb                = 0.f;
+    float        gateThresholdDb      = -60.f;
+    int          inputChannel         = 0;
     bool         listDevices    = false;
     bool         listMidi       = false;
     bool         help           = false;
@@ -69,6 +71,7 @@ static void printUsage(const char* prog)
         "  --sample-rate <Hz>          Sample rate  [default: 48000]\n"
         "  --buffer <frames>           Buffer size in frames  [default: 128]\n"
         "  --gain <dB>                 Initial master gain in dB  [default: 0.0]\n"
+        "  --gate-threshold <dB>       Noise gate threshold  [-80, 0] dB  [default: -60]\n"
         "  --input-channel <N>         Capture channel: 0=left, 1=right  [default: 0]\n"
         "  --midi-device <hw:X,Y,Z>    ALSA raw MIDI input device\n"
         "  --midi-cc <cc>:<ParamName>  Map a MIDI CC to a parameter  (repeatable)\n"
@@ -77,10 +80,10 @@ static void printUsage(const char* prog)
         "  --help                      Show this help and exit\n"
         "\n"
         "Parameter names for --midi-cc:\n"
-        "  MasterGain_dB   BloomBasePre_dB  BloomBasePost_dB\n"
-        "  BloomPreDepth   BloomPostDepth   EnvAttackMs  EnvReleaseMs\n"
-        "  EqBand1GainDb   EqBand2GainDb    EqBand3GainDb\n"
-        "  ReverbRoomSize  ReverbDamping    ReverbWet_Norm\n"
+        "  MasterGain_dB        BloomBasePre_dB    BloomBasePost_dB\n"
+        "  BloomPreDepth        BloomPostDepth     EnvAttackMs  EnvReleaseMs\n"
+        "  NoiseGateThreshold_dB  NoiseGateAttackMs  NoiseGateReleaseMs  NoiseGateHoldMs\n"
+        "  EqBand1GainDb        EqBand2GainDb      EqBand3GainDb\n"
         "\n"
         "Examples:\n"
         "  %s --model ~/amp.nam --input-device hw:CARD=V276,DEV=0 \\\n"
@@ -163,6 +166,9 @@ static bool parseArgs(int argc, char** argv, Args& args)
         } else if (std::strcmp(key, "--gain") == 0) {
             const char* v = nextArg(); if (!v) return false;
             args.gainDb = static_cast<float>(std::atof(v));
+        } else if (std::strcmp(key, "--gate-threshold") == 0) {
+            const char* v = nextArg(); if (!v) return false;
+            args.gateThresholdDb = static_cast<float>(std::atof(v));
         } else if (std::strcmp(key, "--input-channel") == 0) {
             const char* v = nextArg(); if (!v) return false;
             args.inputChannel = std::atoi(v);
@@ -257,7 +263,8 @@ int main(int argc, char** argv)
     // -------------------------------------------------------------------------
 
     hexcaster::ParamRegistry params;
-    params.set(hexcaster::ParamId::MasterGain_dB, args.gainDb);
+    params.set(hexcaster::ParamId::MasterGain_dB,         args.gainDb);
+    params.set(hexcaster::ParamId::NoiseGateThreshold_dB, args.gateThresholdDb);
 
     hexcaster::MidiMap midiMap;
     for (const auto& m : args.midiMappings) {
@@ -266,19 +273,23 @@ int main(int argc, char** argv)
         // paramIdFromName uses -- only happens at startup, not in the audio path)
         const char* paramName = "?";
         struct { const char* n; hexcaster::ParamId id; } kNames[] = {
-            {"MasterGain_dB",    hexcaster::ParamId::MasterGain_dB},
-            {"BloomBasePre_dB",  hexcaster::ParamId::BloomBasePre_dB},
-            {"BloomBasePost_dB", hexcaster::ParamId::BloomBasePost_dB},
-            {"BloomPreDepth",    hexcaster::ParamId::BloomPreDepth},
-            {"BloomPostDepth",   hexcaster::ParamId::BloomPostDepth},
-            {"EnvAttackMs",      hexcaster::ParamId::EnvAttackMs},
-            {"EnvReleaseMs",     hexcaster::ParamId::EnvReleaseMs},
-            {"EqBand1GainDb",    hexcaster::ParamId::EqBand1GainDb},
-            {"EqBand2GainDb",    hexcaster::ParamId::EqBand2GainDb},
-            {"EqBand3GainDb",    hexcaster::ParamId::EqBand3GainDb},
-            {"ReverbRoomSize",   hexcaster::ParamId::ReverbRoomSize},
-            {"ReverbDamping",    hexcaster::ParamId::ReverbDamping},
-            {"ReverbWet_Norm",   hexcaster::ParamId::ReverbWet_Norm},
+            {"MasterGain_dB",         hexcaster::ParamId::MasterGain_dB},
+            {"BloomBasePre_dB",       hexcaster::ParamId::BloomBasePre_dB},
+            {"BloomBasePost_dB",      hexcaster::ParamId::BloomBasePost_dB},
+            {"BloomPreDepth",         hexcaster::ParamId::BloomPreDepth},
+            {"BloomPostDepth",        hexcaster::ParamId::BloomPostDepth},
+            {"EnvAttackMs",           hexcaster::ParamId::EnvAttackMs},
+            {"EnvReleaseMs",          hexcaster::ParamId::EnvReleaseMs},
+            {"NoiseGateThreshold_dB", hexcaster::ParamId::NoiseGateThreshold_dB},
+            {"NoiseGateAttackMs",     hexcaster::ParamId::NoiseGateAttackMs},
+            {"NoiseGateReleaseMs",    hexcaster::ParamId::NoiseGateReleaseMs},
+            {"NoiseGateHoldMs",       hexcaster::ParamId::NoiseGateHoldMs},
+            {"EqBand1GainDb",         hexcaster::ParamId::EqBand1GainDb},
+            {"EqBand2GainDb",         hexcaster::ParamId::EqBand2GainDb},
+            {"EqBand3GainDb",         hexcaster::ParamId::EqBand3GainDb},
+            {"ReverbRoomSize",        hexcaster::ParamId::ReverbRoomSize},
+            {"ReverbDamping",         hexcaster::ParamId::ReverbDamping},
+            {"ReverbWet_Norm",        hexcaster::ParamId::ReverbWet_Norm},
         };
         for (auto& e : kNames)
             if (e.id == m.paramId) { paramName = e.n; break; }
@@ -289,14 +300,18 @@ int main(int argc, char** argv)
     // DSP pipeline
     // -------------------------------------------------------------------------
 
+    hexcaster::NoiseGate noiseGate;
+    noiseGate.setThresholdDb(args.gateThresholdDb);
+
     hexcaster::GainStage masterGain;
     masterGain.setGainDb(args.gainDb);
 
     hexcaster::NamStage nam;
 
     hexcaster::Pipeline pipeline;
-    pipeline.addStage(&masterGain);
-    pipeline.addStage(&nam);
+    pipeline.addStage(&noiseGate);   // stage 0: gate first
+    pipeline.addStage(&masterGain);  // stage 1: input gain
+    pipeline.addStage(&nam);         // stage 2: amp model
     pipeline.prepare(static_cast<float>(args.sampleRate),
                      static_cast<int>(args.bufferFrames));
 
@@ -355,7 +370,12 @@ int main(int argc, char** argv)
     // Audio callback: sync params -> stages each block, then process.
     // Param reads are atomic; no locks in this path.
     engine.setCallback([&](float* buf, int n) {
-        masterGain.setGainDb(params.get(hexcaster::ParamId::MasterGain_dB));
+        // Sync params -> stages each block. Reads are atomic; no locks.
+        noiseGate.setThresholdDb(params.get(hexcaster::ParamId::NoiseGateThreshold_dB));
+        noiseGate.setAttackMs   (params.get(hexcaster::ParamId::NoiseGateAttackMs));
+        noiseGate.setReleaseMs  (params.get(hexcaster::ParamId::NoiseGateReleaseMs));
+        noiseGate.setHoldMs     (params.get(hexcaster::ParamId::NoiseGateHoldMs));
+        masterGain.setGainDb    (params.get(hexcaster::ParamId::MasterGain_dB));
         pipeline.process(buf, n);
     });
 
@@ -383,8 +403,8 @@ int main(int argc, char** argv)
 
     std::fprintf(stdout,
         "Running -- press Ctrl+C to stop.\n"
-        "Gain: %.1f dB  |  Input ch: %d  |  Output: L+R%s\n",
-        args.gainDb, args.inputChannel,
+        "Gate: %.1f dB  |  Gain: %.1f dB  |  Input ch: %d  |  Output: L+R%s\n",
+        args.gateThresholdDb, args.gainDb, args.inputChannel,
         midiInput.isOpen() ? "  |  MIDI active" : "");
 
     std::thread watcher([&]() {
