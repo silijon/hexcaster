@@ -271,6 +271,9 @@ void AlsaAudioEngine::run()
 void AlsaAudioEngine::stop()
 {
     running_.store(false, std::memory_order_release);
+    // Abort any in-progress snd_pcm_readi so the audio loop unblocks
+    // immediately rather than waiting for the next period to arrive.
+    if (captureHandle_) snd_pcm_drop(captureHandle_);
 }
 
 void AlsaAudioEngine::close()

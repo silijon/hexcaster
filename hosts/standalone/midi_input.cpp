@@ -1,7 +1,10 @@
 #include "midi_input.h"
 
 #include <alsa/asoundlib.h>
+#include <cerrno>
 #include <cstdio>
+#include <cstring>
+#include <poll.h>
 
 namespace hexcaster {
 
@@ -21,7 +24,8 @@ MidiInput::~MidiInput()
 
 bool MidiInput::open(const std::string& device)
 {
-    // Open for input only (nullptr for output handle)
+    // Open non-blocking. The reader loop uses poll() with a timeout to
+    // wait for data, so we never need blocking reads.
     int err = snd_rawmidi_open(&handle_, nullptr, device.c_str(), SND_RAWMIDI_NONBLOCK);
     if (err < 0) {
         errorMsg_ = std::string("Failed to open MIDI device '")
@@ -30,17 +34,12 @@ bool MidiInput::open(const std::string& device)
         return false;
     }
 
-    // Switch to blocking mode for the reader thread.
-    // We opened non-blocking first to get a fast failure if the device
-    // doesn't exist, then switch to blocking for the read loop.
-    snd_rawmidi_nonblock(handle_, 0);
-
     std::fprintf(stderr, "MIDI input: opened %s\n", device.c_str());
     return true;
 }
 
 // ---------------------------------------------------------------------------
-// start() / stop()
+// start() / stop() / close()
 // ---------------------------------------------------------------------------
 
 void MidiInput::start(MidiMap& midiMap, ParamRegistry& registry)
@@ -55,18 +54,11 @@ void MidiInput::start(MidiMap& midiMap, ParamRegistry& registry)
 void MidiInput::stop()
 {
     if (!running_.load(std::memory_order_acquire)) return;
+    // Signal the reader loop to exit. It checks running_ after each
+    // poll() timeout (100 ms), so it will exit within ~100 ms.
     running_.store(false, std::memory_order_release);
-
-    // Unblock the read call by dropping the handle if thread is stuck.
-    // snd_rawmidi_drop() wakes any blocked read.
-    if (handle_) snd_rawmidi_drop(handle_);
-
     if (thread_.joinable()) thread_.join();
 }
-
-// ---------------------------------------------------------------------------
-// close()
-// ---------------------------------------------------------------------------
 
 void MidiInput::close()
 {
@@ -81,68 +73,86 @@ void MidiInput::close()
 //
 // MIDI byte parser state machine.
 //
+// Uses poll() with a 100 ms timeout so the loop can check running_ without
+// blocking forever waiting for MIDI data. This makes stop() reliable: just
+// set running_ = false and join -- the thread exits within ~100 ms.
+//
 // MIDI CC message format:
 //   Byte 0: 0xBn  (status: Control Change, channel n)
 //   Byte 1: cc    (controller number, 0-127)
 //   Byte 2: value (controller value, 0-127)
 //
-// We implement "running status": if the next byte is a data byte (bit 7 = 0)
-// and the last status byte was a CC, we reuse the previous status byte.
+// Running status is supported: consecutive CC messages may omit the
+// status byte and reuse the previous one.
 // ---------------------------------------------------------------------------
 
 void MidiInput::readerLoop(MidiMap& midiMap, ParamRegistry& registry)
 {
+    // Get the poll file descriptor for this MIDI handle.
+    struct pollfd pfd{};
+    const int nfds = snd_rawmidi_poll_descriptors(handle_, &pfd, 1);
+    if (nfds < 1) {
+        std::fprintf(stderr, "MIDI: failed to get poll descriptor\n");
+        return;
+    }
+
     // Parser state
     enum class State { WaitStatus, WaitData1, WaitData2 };
-    State   state      = State::WaitStatus;
-    uint8_t status     = 0;
-    uint8_t data1      = 0;
-    bool    isCC       = false;
-
-    uint8_t byte = 0;
+    State   state = State::WaitStatus;
+    uint8_t data1 = 0;
+    bool    isCC  = false;
 
     while (running_.load(std::memory_order_acquire)) {
-        ssize_t n = snd_rawmidi_read(handle_, &byte, 1);
+        // Wait up to 100 ms for MIDI data. On timeout, loop and re-check
+        // running_. This is the only blocking call -- safe to exit from.
+        const int ret = poll(&pfd, 1, 100 /*ms*/);
 
-        if (n < 0) {
-            if (n == -EINTR) continue;   // interrupted by signal, retry
-            if (!running_.load(std::memory_order_acquire)) break;
-            std::fprintf(stderr, "MIDI read error: %s\n", snd_strerror(static_cast<int>(n)));
+        if (ret < 0) {
+            if (errno == EINTR) continue;  // interrupted by signal, retry
+            std::fprintf(stderr, "MIDI poll error: %s\n", std::strerror(errno));
             break;
         }
-        if (n == 0) continue;
+        if (ret == 0) continue;  // timeout -- check running_ again
 
-        if (byte & 0x80) {
-            // Status byte -- start of a new message
-            status = byte;
-            isCC   = ((status & 0xF0) == 0xB0);  // CC on any channel
-            state  = isCC ? State::WaitData1 : State::WaitStatus;
-        } else {
-            // Data byte -- running status applies
-            switch (state) {
-                case State::WaitStatus:
-                    // Unexpected data byte with no active CC status -- ignore
-                    break;
+        // Data available -- drain all available bytes in this pass.
+        uint8_t byte;
+        while (true) {
+            const ssize_t n = snd_rawmidi_read(handle_, &byte, 1);
 
-                case State::WaitData1:
-                    data1 = byte;
-                    state = State::WaitData2;
-                    break;
+            if (n == -EAGAIN) break;          // no more bytes right now
+            if (n < 0) {
+                if (!running_.load(std::memory_order_acquire)) goto done;
+                std::fprintf(stderr, "MIDI read error: %s\n",
+                             snd_strerror(static_cast<int>(n)));
+                goto done;
+            }
+            if (n == 0) break;
 
-                case State::WaitData2:
-                    if (isCC) {
-                        const uint8_t cc    = data1 & 0x7F;
-                        const uint8_t value = byte  & 0x7F;
-                        midiMap.dispatch(cc, value, registry);
-                    }
-                    // Running status: stay in WaitData1 for the next message
-                    // using the same status byte.
-                    state = State::WaitData1;
-                    break;
+            if (byte & 0x80) {
+                // Status byte
+                isCC  = ((byte & 0xF0) == 0xB0);  // CC on any channel
+                state = isCC ? State::WaitData1 : State::WaitStatus;
+            } else {
+                // Data byte (running status)
+                switch (state) {
+                    case State::WaitStatus:
+                        break;  // no active CC status -- ignore
+                    case State::WaitData1:
+                        data1 = byte;
+                        state = State::WaitData2;
+                        break;
+                    case State::WaitData2:
+                        if (isCC) {
+                            midiMap.dispatch(data1 & 0x7F, byte & 0x7F, registry);
+                        }
+                        state = State::WaitData1;  // running status
+                        break;
+                }
             }
         }
     }
 
+done:
     std::fprintf(stderr, "MIDI reader thread exited.\n");
 }
 
