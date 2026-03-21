@@ -91,7 +91,7 @@ With MIDI CC control:
   --input-device hw:CARD=V276,DEV=0 \
   --output-device hw:CARD=sndrpihifiberry,DEV=0 \
   --midi-device hw:1,0,0 \
-  --midi-cc 7:MasterGain_dB \
+  --midi-cc 7:InputGain_dB \
   --midi-cc 1:BloomBasePre_dB
 ```
 

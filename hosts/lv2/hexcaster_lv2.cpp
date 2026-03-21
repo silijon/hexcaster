@@ -6,7 +6,7 @@
  * Port layout:
  *   0 -- Audio In       (lv2:AudioPort,   lv2:InputPort)
  *   1 -- Audio Out      (lv2:AudioPort,   lv2:OutputPort)
- *   2 -- Master Gain dB (lv2:ControlPort, lv2:InputPort)  [-60, +24], default 0
+ *   2 -- Input Gain dB  (lv2:ControlPort, lv2:InputPort)  [-60, +24], default 0
  *   3 -- Model Reload   (lv2:ControlPort, lv2:InputPort)  [0, 1], default 0
  *                       Toggle from 0 -> 1 to trigger model load.
  *
@@ -75,7 +75,7 @@ static std::string readSidecar()
 enum PortIndex {
     PORT_AUDIO_IN     = 0,
     PORT_AUDIO_OUT    = 1,
-    PORT_MASTER_GAIN  = 2,
+    PORT_INPUT_GAIN   = 2,
     PORT_MODEL_RELOAD = 3,
     PORT_COUNT
 };
@@ -88,7 +88,7 @@ struct HexCasterLV2 {
     // Ports (set by connect_port, valid during run())
     const float* audioIn        = nullptr;
     float*       audioOut       = nullptr;
-    const float* masterGainCtl  = nullptr;
+    const float* inputGainCtl   = nullptr;
     const float* modelReloadCtl = nullptr;
 
     // Edge-detect for reload trigger
@@ -110,7 +110,7 @@ struct HexCasterLV2 {
     // DSP
     hexcaster::ParamRegistry params;
     hexcaster::NoiseGate     noiseGate;
-    hexcaster::GainStage     masterGain;
+    hexcaster::GainStage     inputGain;
     hexcaster::NamStage      nam;
     hexcaster::Pipeline      pipeline;
 
@@ -128,10 +128,10 @@ struct HexCasterLV2 {
         }
 
         noiseGate.setThresholdDb(params.get(hexcaster::ParamId::NoiseGateThreshold_dB));
-        masterGain.setGainDb(params.get(hexcaster::ParamId::MasterGain_dB));
+        inputGain.setGainDb(params.get(hexcaster::ParamId::InputGain_dB));
 
-        pipeline.addStage(&noiseGate);   // stage 0
-        pipeline.addStage(&masterGain);  // stage 1
+        pipeline.addStage(&noiseGate);  // stage 0
+        pipeline.addStage(&inputGain);  // stage 1
         pipeline.addStage(&nam);         // stage 2
         pipeline.prepare(static_cast<float>(sampleRate), 4096);
     }
@@ -184,8 +184,8 @@ static void connect_port(LV2_Handle instance, uint32_t port, void* data)
             self->audioIn        = static_cast<const float*>(data); break;
         case PORT_AUDIO_OUT:
             self->audioOut       = static_cast<float*>(data);       break;
-        case PORT_MASTER_GAIN:
-            self->masterGainCtl  = static_cast<const float*>(data); break;
+        case PORT_INPUT_GAIN:
+            self->inputGainCtl   = static_cast<const float*>(data); break;
         case PORT_MODEL_RELOAD:
             self->modelReloadCtl = static_cast<const float*>(data); break;
         default: break;
@@ -203,8 +203,8 @@ static void run(LV2_Handle instance, uint32_t sampleCount)
     self->noiseGate.setThresholdDb(
         self->params.get(hexcaster::ParamId::NoiseGateThreshold_dB));
 
-    if (self->masterGainCtl) {
-        self->masterGain.setGainDb(*self->masterGainCtl);
+    if (self->inputGainCtl) {
+        self->inputGain.setGainDb(*self->inputGainCtl);
     }
 
     // Model reload trigger: fire background load on 0 -> 1 rising edge only.

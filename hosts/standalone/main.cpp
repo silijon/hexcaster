@@ -70,7 +70,7 @@ static void printUsage(const char* prog)
         "  --output-device <dev>       Output audio device\n"
         "  --sample-rate <Hz>          Sample rate  [default: 48000]\n"
         "  --buffer <frames>           Buffer size in frames  [default: 128]\n"
-        "  --gain <dB>                 Initial master gain in dB  [default: 0.0]\n"
+        "  --gain <dB>                 Initial input gain in dB  [default: 0.0]\n"
         "  --gate-threshold <dB>       Noise gate threshold  [-80, 0] dB  [default: -60]\n"
         "  --input-channel <N>         Capture channel: 0=left, 1=right  [default: 0]\n"
         "  --midi-device <hw:X,Y,Z>    ALSA raw MIDI input device\n"
@@ -80,7 +80,7 @@ static void printUsage(const char* prog)
         "  --help                      Show this help and exit\n"
         "\n"
         "Parameter names for --midi-cc:\n"
-        "  MasterGain_dB        BloomBasePre_dB    BloomBasePost_dB\n"
+        "  InputGain_dB         BloomBasePre_dB    BloomBasePost_dB\n"
         "  BloomPreDepth        BloomPostDepth     EnvAttackMs  EnvReleaseMs\n"
         "  NoiseGateThreshold_dB  NoiseGateAttackMs  NoiseGateReleaseMs  NoiseGateHoldMs\n"
         "  EqBand1GainDb        EqBand2GainDb      EqBand3GainDb\n"
@@ -92,13 +92,13 @@ static void printUsage(const char* prog)
         "  %s --model ~/amp.nam --input-device hw:CARD=V276,DEV=0 \\\n"
         "     --output-device hw:CARD=sndrpihifiberry,DEV=0 \\\n"
         "     --midi-device hw:1,0,0 \\\n"
-        "     --midi-cc 7:MasterGain_dB --midi-cc 1:BloomBasePre_dB\n",
+        "     --midi-cc 7:InputGain_dB --midi-cc 1:BloomBasePre_dB\n",
         prog, prog, prog);
 }
 
 static bool parseMidiCc(const char* arg, MidiCcMapping& out)
 {
-    // Expected format: "<cc>:<ParamName>"  e.g. "7:MasterGain_dB"
+    // Expected format: "<cc>:<ParamName>"  e.g. "7:InputGain_dB"
     const char* colon = std::strchr(arg, ':');
     if (!colon) {
         std::fprintf(stderr, "Error: --midi-cc requires format <cc>:<ParamName>, got '%s'\n", arg);
@@ -263,7 +263,7 @@ int main(int argc, char** argv)
     // -------------------------------------------------------------------------
 
     hexcaster::ParamRegistry params;
-    params.set(hexcaster::ParamId::MasterGain_dB,         args.gainDb);
+    params.set(hexcaster::ParamId::InputGain_dB,          args.gainDb);
     params.set(hexcaster::ParamId::NoiseGateThreshold_dB, args.gateThresholdDb);
 
     hexcaster::MidiMap midiMap;
@@ -273,7 +273,7 @@ int main(int argc, char** argv)
         // paramIdFromName uses -- only happens at startup, not in the audio path)
         const char* paramName = "?";
         struct { const char* n; hexcaster::ParamId id; } kNames[] = {
-            {"MasterGain_dB",         hexcaster::ParamId::MasterGain_dB},
+            {"InputGain_dB",          hexcaster::ParamId::InputGain_dB},
             {"BloomBasePre_dB",       hexcaster::ParamId::BloomBasePre_dB},
             {"BloomBasePost_dB",      hexcaster::ParamId::BloomBasePost_dB},
             {"BloomPreDepth",         hexcaster::ParamId::BloomPreDepth},
@@ -303,14 +303,14 @@ int main(int argc, char** argv)
     hexcaster::NoiseGate noiseGate;
     noiseGate.setThresholdDb(args.gateThresholdDb);
 
-    hexcaster::GainStage masterGain;
-    masterGain.setGainDb(args.gainDb);
+    hexcaster::GainStage inputGain;
+    inputGain.setGainDb(args.gainDb);
 
     hexcaster::NamStage nam;
 
     hexcaster::Pipeline pipeline;
     pipeline.addStage(&noiseGate);   // stage 0: gate first
-    pipeline.addStage(&masterGain);  // stage 1: input gain
+    pipeline.addStage(&inputGain);   // stage 1: input gain
     pipeline.addStage(&nam);         // stage 2: amp model
     pipeline.prepare(static_cast<float>(args.sampleRate),
                      static_cast<int>(args.bufferFrames));
@@ -375,7 +375,7 @@ int main(int argc, char** argv)
         noiseGate.setAttackMs   (params.get(hexcaster::ParamId::NoiseGateAttackMs));
         noiseGate.setReleaseMs  (params.get(hexcaster::ParamId::NoiseGateReleaseMs));
         noiseGate.setHoldMs     (params.get(hexcaster::ParamId::NoiseGateHoldMs));
-        masterGain.setGainDb    (params.get(hexcaster::ParamId::MasterGain_dB));
+        inputGain.setGainDb     (params.get(hexcaster::ParamId::InputGain_dB));
         pipeline.process(buf, n);
     });
 
@@ -403,7 +403,7 @@ int main(int argc, char** argv)
 
     std::fprintf(stdout,
         "Running -- press Ctrl+C to stop.\n"
-        "Gate: %.1f dB  |  Gain: %.1f dB  |  Input ch: %d  |  Output: L+R%s\n",
+        "Gate: %.1f dB  |  Input gain: %.1f dB  |  Input ch: %d  |  Output: L+R%s\n",
         args.gateThresholdDb, args.gainDb, args.inputChannel,
         midiInput.isOpen() ? "  |  MIDI active" : "");
 

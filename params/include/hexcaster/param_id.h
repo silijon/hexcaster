@@ -37,8 +37,8 @@ enum class ParamId : uint32_t {
     EqBand3GainDb       = 17,
     EqBand3Q            = 18,
 
-    // --- Master ---
-    MasterGain_dB       = 30,
+    // --- Input Gain ---
+    InputGain_dB        = 30,
 
     // --- Reverb ---
     ReverbRoomSize      = 40,
@@ -55,7 +55,7 @@ enum class ParamId : uint32_t {
 };
 
 /**
- * Look up a ParamId by its string name (e.g. "MasterGain_dB").
+ * Look up a ParamId by its string name (e.g. "InputGain_dB").
  * Returns true and sets `out` on success.
  * Used by CLI parsers and config file loaders.
  */
@@ -78,7 +78,7 @@ inline bool paramIdFromName(std::string_view name, ParamId& out)
         { "EqBand3Freq",      ParamId::EqBand3Freq      },
         { "EqBand3GainDb",    ParamId::EqBand3GainDb    },
         { "EqBand3Q",         ParamId::EqBand3Q         },
-        { "MasterGain_dB",    ParamId::MasterGain_dB    },
+        { "InputGain_dB",     ParamId::InputGain_dB     },
         { "ReverbRoomSize",         ParamId::ReverbRoomSize         },
         { "ReverbDamping",          ParamId::ReverbDamping          },
         { "ReverbWet_Norm",         ParamId::ReverbWet_Norm         },

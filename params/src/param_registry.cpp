@@ -35,8 +35,8 @@ ParamRegistry::kParamInfo = []() {
     info[idx(ParamId::EqBand3GainDb)]    = {   0.f, -24.f,    24.f };
     info[idx(ParamId::EqBand3Q)]         = {   1.f,  0.1f,    10.f };
 
-    // Master
-    info[idx(ParamId::MasterGain_dB)]    = {   0.f, -60.f,   24.f };
+    // Input Gain
+    info[idx(ParamId::InputGain_dB)]     = {   0.f, -60.f,   24.f };
 
     // Reverb
     info[idx(ParamId::ReverbRoomSize)]   = { 0.5f,   0.f,    1.f };
