@@ -156,12 +156,15 @@ Input
   → Output → Power Amp → Guitar Cabinet
 ```
 
-The Bloom controller runs a single envelope follower and drives both gain stages in opposite directions, keeping them synchronised:
+The Bloom controller runs a single envelope follower (with a 100 Hz detector HPF) and drives both gain stages in opposite directions, keeping perceived volume stable:
 
 ```
-PreGain_dB  = BasePre  - A * envelope
-PostGain_dB = BasePost + B * envelope
+reductionDb = BloomDepth * envelope
+PreGain_dB  = BloomBasePre_dB  - reductionDb
+PostGain_dB = BloomBasePost_dB + BloomCompensation * reductionDb
 ```
+
+`BloomCompensation` is a ratio (default 0.5). At 1.0, output exactly compensates for input reduction.
 
 The physical cabinet provides speaker filtering. No IR convolution stage.
 
@@ -170,8 +173,8 @@ The physical cabinet provides speaker filtering. No IR convolution stage.
 | Phase | Status | Scope |
 |-------|--------|-------|
 | 1 | Done | Input Gain, NAM integration, ALSA standalone host, MIDI CC control |
-| 2 | In progress | Noise Gate, mid-sweep EQ, Master Volume |
-| 3 | Planned | Envelope follower, Bloom (pre/post gain modulation), dominance-linked control |
+| 2 | Done | Noise Gate, mid-sweep EQ, Master Volume |
+| 3 | Done | Envelope follower, Bloom controller (pre/post gain modulation) |
 
 ## Performance Targets (Raspberry Pi 5)
 

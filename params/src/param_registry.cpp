@@ -19,8 +19,8 @@ ParamRegistry::kParamInfo = []() {
     // Bloom
     info[idx(ParamId::BloomBasePre_dB)]  = { 0.f,  -24.f, 24.f };
     info[idx(ParamId::BloomBasePost_dB)] = { 0.f,  -24.f, 24.f };
-    info[idx(ParamId::BloomPreDepth)]    = { 6.f,    0.f, 24.f };
-    info[idx(ParamId::BloomPostDepth)]   = { 3.f,    0.f, 24.f };
+    info[idx(ParamId::BloomDepth)]        = { 6.f,    0.f, 24.f };
+    info[idx(ParamId::BloomCompensation)]= { 0.5f,   0.f,  2.f };
     info[idx(ParamId::EnvAttackMs)]      = { 5.f,    0.1f, 500.f };
     info[idx(ParamId::EnvReleaseMs)]     = {100.f,   1.f, 5000.f };
 

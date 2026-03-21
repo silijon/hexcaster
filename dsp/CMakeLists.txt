@@ -26,6 +26,7 @@ target_link_libraries(hexcaster_components
 
 add_library(hexcaster_pipeline STATIC
   pipeline/src/pipeline.cpp
+  pipeline/src/bloom_controller.cpp
 )
 
 target_include_directories(hexcaster_pipeline

@@ -28,6 +28,7 @@
 #include "hexcaster/nam_stage.h"
 #include "hexcaster/noise_gate.h"
 #include "hexcaster/eq.h"
+#include "hexcaster/bloom_controller.h"
 #include "hexcaster/param_registry.h"
 
 #include <lv2/atom/atom.h>
@@ -109,15 +110,19 @@ struct HexCasterLV2 {
     LV2_URID      uridModelUri = 0;
 
     // DSP
-    hexcaster::ParamRegistry params;
-    hexcaster::NoiseGate     noiseGate;
-    hexcaster::GainStage     inputGain;
-    hexcaster::NamStage      nam;
-    hexcaster::MidSweepEQ    eq;
-    hexcaster::GainStage     masterVolume;
-    hexcaster::Pipeline      pipeline;
+    hexcaster::ParamRegistry   params;
+    hexcaster::NoiseGate       noiseGate;
+    hexcaster::GainStage       inputGain;
+    hexcaster::GainStage       bloomPreGain;
+    hexcaster::NamStage        nam;
+    hexcaster::GainStage       bloomPostGain;
+    hexcaster::MidSweepEQ      eq;
+    hexcaster::GainStage       masterVolume;
+    hexcaster::BloomController bloom;
+    hexcaster::Pipeline        pipeline;
 
     explicit HexCasterLV2(double sampleRate, const LV2_Feature* const* features)
+        : bloom(bloomPreGain, bloomPostGain)
     {
         for (int i = 0; features && features[i]; ++i) {
             if (std::strcmp(features[i]->URI, LV2_URID__map) == 0) {
@@ -133,12 +138,16 @@ struct HexCasterLV2 {
         noiseGate.setThresholdDb(params.get(hexcaster::ParamId::NoiseGateThreshold_dB));
         inputGain.setGainDb(params.get(hexcaster::ParamId::InputGain_dB));
 
-        pipeline.addStage(&noiseGate);    // stage 0
-        pipeline.addStage(&inputGain);    // stage 1
-        pipeline.addStage(&nam);          // stage 2
-        pipeline.addStage(&eq);           // stage 3
-        pipeline.addStage(&masterVolume); // stage 4
+        pipeline.addStage(&noiseGate);      // stage 0
+        pipeline.addStage(&inputGain);      // stage 1
+        pipeline.addStage(&bloomPreGain);   // stage 2
+        pipeline.addStage(&nam);            // stage 3
+        pipeline.addStage(&bloomPostGain);  // stage 4
+        pipeline.addStage(&eq);             // stage 5
+        pipeline.addStage(&masterVolume);   // stage 6
+        pipeline.addController(&bloom);
         pipeline.prepare(static_cast<float>(sampleRate), 4096);
+        bloom.prepare(static_cast<float>(sampleRate), 4096);
     }
 
     ~HexCasterLV2()
@@ -212,9 +221,15 @@ static void run(LV2_Handle instance, uint32_t sampleCount)
         self->inputGain.setGainDb(*self->inputGainCtl);
     }
 
-    self->eq.setGainDb (self->params.get(hexcaster::ParamId::EqGain_dB));
-    self->eq.setSweepHz(self->params.get(hexcaster::ParamId::EqSweepHz));
-    self->eq.setQ      (self->params.get(hexcaster::ParamId::EqQ));
+    self->bloom.setBasePreDb   (self->params.get(hexcaster::ParamId::BloomBasePre_dB));
+    self->bloom.setBasePostDb  (self->params.get(hexcaster::ParamId::BloomBasePost_dB));
+    self->bloom.setDepth       (self->params.get(hexcaster::ParamId::BloomDepth));
+    self->bloom.setCompensation(self->params.get(hexcaster::ParamId::BloomCompensation));
+    self->bloom.setAttackMs    (self->params.get(hexcaster::ParamId::EnvAttackMs));
+    self->bloom.setReleaseMs   (self->params.get(hexcaster::ParamId::EnvReleaseMs));
+    self->eq.setGainDb         (self->params.get(hexcaster::ParamId::EqGain_dB));
+    self->eq.setSweepHz        (self->params.get(hexcaster::ParamId::EqSweepHz));
+    self->eq.setQ              (self->params.get(hexcaster::ParamId::EqQ));
     self->masterVolume.setGainDb(self->params.get(hexcaster::ParamId::MasterVolume_dB));
 
     // Model reload trigger: fire background load on 0 -> 1 rising edge only.

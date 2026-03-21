@@ -106,10 +106,14 @@ Purpose:
 
 Envelope output drives:
 
-PreGain_dB = BasePre - A * envelope
-PostGain_dB = BasePost + B * envelope
+reductionDb = BloomDepth * envelope
+PreGain_dB  = BloomBasePre_dB  - reductionDb
+PostGain_dB = BloomBasePost_dB + BloomCompensation * reductionDb
 
-Both must be clamped to safe limits.
+Where BloomCompensation is a ratio [0, 2.0] (default 0.5) applied to the
+input reduction. At 1.0, output exactly compensates input reduction.
+
+Both values are clamped to safe limits.
 
 ______________________________________________________________________
 
@@ -221,19 +225,22 @@ hexcaster/
 │   │   │   ├── processor_stage.h # Abstract stage interface
 │   │   │   ├── gain_stage.h
 │   │   │   ├── nam_stage.h       # NeuralAudio wrapper
-│   │   │   ├── envelope.h        # (stub -- Phase 3)
-│   │   │   ├── eq.h              # (stub -- Phase 2)
-│   │   │   └── noise_gate.h      # (stub -- Phase 2)
+│   │   │   ├── noise_gate.h
+│   │   │   ├── eq.h              # Mid-sweep biquad peaking EQ
+│   │   │   └── envelope.h        # (stub -- future standalone envelope component)
 │   │   └── src/
 │   │       ├── gain_stage.cpp
-│   │       └── nam_stage.cpp
+│   │       ├── nam_stage.cpp
+│   │       ├── noise_gate.cpp
+│   │       └── eq.cpp
 │   │
 │   └── pipeline/                 # Signal flow composition (hexcaster_pipeline)
 │       ├── include/hexcaster/
 │       │   ├── pipeline.h        # Ordered stage chain + controller hooks
-│       │   └── bloom_controller.h # Pre/post gain coordinator (stub -- Phase 3)
+│       │   └── bloom_controller.h # Envelope-driven pre/post gain coordinator
 │       └── src/
-│           └── pipeline.cpp
+│           ├── pipeline.cpp
+│           └── bloom_controller.cpp
 │
 ├── params/                       # Parameter system (hexcaster_params)
 │   ├── CMakeLists.txt
@@ -316,21 +323,27 @@ ______________________________________________________________________
 
 # 9. Development Phases
 
-Phase 1:
+Phase 1 (Done):
 
 - Input Gain
 - NAM integration
-- Performance profiling on Pi
+- MIDI CC control
+- ALSA standalone host on Pi 5
 
-Phase 2:
+Phase 2 (Done):
 
 - Noise Gate
-- EQ
+- Mid-sweep EQ
 - Master Volume
 
-Phase 3:
+Phase 3 (Done):
 
-- Envelope + Pre/Post gain modulation stages
+- Envelope follower (100 Hz detector HPF, per-sample peak tracking)
+- Bloom controller (pre/post gain modulation around NAM)
+- BloomDepth + BloomCompensation ratio parameters
+
+Future:
+
 - Dominance-linked envelope control
 
 ______________________________________________________________________

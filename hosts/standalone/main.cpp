@@ -7,6 +7,7 @@
 #include "hexcaster/nam_stage.h"
 #include "hexcaster/noise_gate.h"
 #include "hexcaster/eq.h"
+#include "hexcaster/bloom_controller.h"
 #include "hexcaster/param_registry.h"
 #include "hexcaster/midi_map.h"
 #include "hexcaster/param_id.h"
@@ -55,6 +56,8 @@ struct Args {
     float        eqGainDb             = 0.f;
     float        eqSweepHz            = 1000.f;
     float        masterVolumeDb       = 0.f;
+    float        bloomDepth           = 6.f;
+    float        bloomCompensation    = 0.5f;
     int          inputChannel         = 0;
     bool         listDevices    = false;
     bool         listMidi       = false;
@@ -79,6 +82,8 @@ static void printUsage(const char* prog)
         "  --eq-gain <dB>              Post-NAM EQ gain  [-12, +12] dB  [default: 0]\n"
         "  --eq-sweep <Hz>             Post-NAM EQ center frequency  [300, 2500] Hz  [default: 1000]\n"
         "  --master-volume <dB>        Final output level to power amp  [-60, +24] dB  [default: 0]\n"
+        "  --bloom-depth <dB>          Bloom max input gain reduction  [0, 24] dB  [default: 6]\n"
+        "  --bloom-compensation <r>    Bloom output compensation ratio  [0, 2]  [default: 0.5]\n"
         "  --input-channel <N>         Capture channel: 0=left, 1=right  [default: 0]\n"
         "  --midi-device <hw:X,Y,Z>    ALSA raw MIDI input device\n"
         "  --midi-cc <cc>:<ParamName>  Map a MIDI CC to a parameter  (repeatable)\n"
@@ -88,7 +93,7 @@ static void printUsage(const char* prog)
         "\n"
         "Parameter names for --midi-cc:\n"
         "  InputGain_dB         BloomBasePre_dB    BloomBasePost_dB\n"
-        "  BloomPreDepth        BloomPostDepth     EnvAttackMs  EnvReleaseMs\n"
+        "  BloomDepth  BloomCompensation  EnvAttackMs  EnvReleaseMs\n"
         "  NoiseGateThreshold_dB  NoiseGateAttackMs  NoiseGateReleaseMs  NoiseGateHoldMs\n"
         "  EqGain_dB  EqSweepHz  EqQ  MasterVolume_dB\n"
         "\n"
@@ -185,6 +190,12 @@ static bool parseArgs(int argc, char** argv, Args& args)
         } else if (std::strcmp(key, "--master-volume") == 0) {
             const char* v = nextArg(); if (!v) return false;
             args.masterVolumeDb = static_cast<float>(std::atof(v));
+        } else if (std::strcmp(key, "--bloom-depth") == 0) {
+            const char* v = nextArg(); if (!v) return false;
+            args.bloomDepth = static_cast<float>(std::atof(v));
+        } else if (std::strcmp(key, "--bloom-compensation") == 0) {
+            const char* v = nextArg(); if (!v) return false;
+            args.bloomCompensation = static_cast<float>(std::atof(v));
         } else if (std::strcmp(key, "--input-channel") == 0) {
             const char* v = nextArg(); if (!v) return false;
             args.inputChannel = std::atoi(v);
@@ -284,6 +295,8 @@ int main(int argc, char** argv)
     params.set(hexcaster::ParamId::EqGain_dB,             args.eqGainDb);
     params.set(hexcaster::ParamId::EqSweepHz,             args.eqSweepHz);
     params.set(hexcaster::ParamId::MasterVolume_dB,       args.masterVolumeDb);
+    params.set(hexcaster::ParamId::BloomDepth,            args.bloomDepth);
+    params.set(hexcaster::ParamId::BloomCompensation,     args.bloomCompensation);
 
     hexcaster::MidiMap midiMap;
     for (const auto& m : args.midiMappings) {
@@ -295,8 +308,8 @@ int main(int argc, char** argv)
             {"InputGain_dB",          hexcaster::ParamId::InputGain_dB},
             {"BloomBasePre_dB",       hexcaster::ParamId::BloomBasePre_dB},
             {"BloomBasePost_dB",      hexcaster::ParamId::BloomBasePost_dB},
-            {"BloomPreDepth",         hexcaster::ParamId::BloomPreDepth},
-            {"BloomPostDepth",        hexcaster::ParamId::BloomPostDepth},
+            {"BloomDepth",            hexcaster::ParamId::BloomDepth},
+            {"BloomCompensation",     hexcaster::ParamId::BloomCompensation},
             {"EnvAttackMs",           hexcaster::ParamId::EnvAttackMs},
             {"EnvReleaseMs",          hexcaster::ParamId::EnvReleaseMs},
             {"NoiseGateThreshold_dB", hexcaster::ParamId::NoiseGateThreshold_dB},
@@ -323,6 +336,9 @@ int main(int argc, char** argv)
     hexcaster::GainStage inputGain;
     inputGain.setGainDb(args.gainDb);
 
+    hexcaster::GainStage bloomPreGain;   // controlled by BloomController
+    hexcaster::GainStage bloomPostGain;  // controlled by BloomController
+
     hexcaster::NamStage nam;
 
     hexcaster::MidSweepEQ eq;
@@ -332,16 +348,29 @@ int main(int argc, char** argv)
     hexcaster::GainStage masterVolume;
     masterVolume.setGainDb(args.masterVolumeDb);
 
+    // Bloom controller: drives bloomPreGain and bloomPostGain from
+    // an envelope follower. Registered as a PipelineController -- it
+    // runs in preProcess() before any stages execute.
+    hexcaster::BloomController bloom(bloomPreGain, bloomPostGain);
+    bloom.setDepth(args.bloomDepth);
+    bloom.setCompensation(args.bloomCompensation);
+
     hexcaster::Pipeline pipeline;
-    pipeline.addStage(&noiseGate);    // stage 0: noise gate
-    pipeline.addStage(&inputGain);    // stage 1: input gain
-    pipeline.addStage(&nam);          // stage 2: amp model
-    pipeline.addStage(&eq);           // stage 3: post-NAM EQ
-    pipeline.addStage(&masterVolume); // stage 4: master volume
+    pipeline.addStage(&noiseGate);      // stage 0: noise gate
+    pipeline.addStage(&inputGain);      // stage 1: input gain (user)
+    pipeline.addStage(&bloomPreGain);   // stage 2: bloom pre-gain (dynamic)
+    pipeline.addStage(&nam);            // stage 3: amp model
+    pipeline.addStage(&bloomPostGain);  // stage 4: bloom post-gain (dynamic)
+    pipeline.addStage(&eq);             // stage 5: post-NAM EQ
+    pipeline.addStage(&masterVolume);   // stage 6: master volume (user)
+    pipeline.addController(&bloom);
     pipeline.prepare(static_cast<float>(args.sampleRate),
                      static_cast<int>(args.bufferFrames));
+    bloom.prepare(static_cast<float>(args.sampleRate),
+                  static_cast<int>(args.bufferFrames));
 
-    std::fprintf(stdout, "Pipeline: %d stage(s)\n", pipeline.numStages());
+    std::fprintf(stdout, "Pipeline: %d stage(s), %d controller(s)\n",
+                 pipeline.numStages(), pipeline.numControllers());
 
     // -------------------------------------------------------------------------
     // Load NAM model
@@ -391,6 +420,8 @@ int main(int argc, char** argv)
             args.bufferFrames, engine.actualBufferFrames());
         pipeline.prepare(static_cast<float>(engine.actualSampleRate()),
                          static_cast<int>(engine.actualBufferFrames()));
+        bloom.prepare(static_cast<float>(engine.actualSampleRate()),
+                      static_cast<int>(engine.actualBufferFrames()));
     }
 
     // Audio callback: sync params -> stages each block, then process.
@@ -402,10 +433,16 @@ int main(int argc, char** argv)
         noiseGate.setReleaseMs  (params.get(hexcaster::ParamId::NoiseGateReleaseMs));
         noiseGate.setHoldMs     (params.get(hexcaster::ParamId::NoiseGateHoldMs));
         inputGain.setGainDb     (params.get(hexcaster::ParamId::InputGain_dB));
-        eq.setGainDb      (params.get(hexcaster::ParamId::EqGain_dB));
-        eq.setSweepHz     (params.get(hexcaster::ParamId::EqSweepHz));
-        eq.setQ           (params.get(hexcaster::ParamId::EqQ));
-        masterVolume.setGainDb(params.get(hexcaster::ParamId::MasterVolume_dB));
+        bloom.setBasePreDb      (params.get(hexcaster::ParamId::BloomBasePre_dB));
+        bloom.setBasePostDb     (params.get(hexcaster::ParamId::BloomBasePost_dB));
+        bloom.setDepth          (params.get(hexcaster::ParamId::BloomDepth));
+        bloom.setCompensation   (params.get(hexcaster::ParamId::BloomCompensation));
+        bloom.setAttackMs       (params.get(hexcaster::ParamId::EnvAttackMs));
+        bloom.setReleaseMs      (params.get(hexcaster::ParamId::EnvReleaseMs));
+        eq.setGainDb            (params.get(hexcaster::ParamId::EqGain_dB));
+        eq.setSweepHz           (params.get(hexcaster::ParamId::EqSweepHz));
+        eq.setQ                 (params.get(hexcaster::ParamId::EqQ));
+        masterVolume.setGainDb  (params.get(hexcaster::ParamId::MasterVolume_dB));
         pipeline.process(buf, n);
     });
 

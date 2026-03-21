@@ -19,12 +19,12 @@ namespace hexcaster {
  */
 enum class ParamId : uint32_t {
     // --- Bloom (dynamic gain) ---
-    BloomBasePre_dB     = 0,  // Base pre-amp gain (dB)
-    BloomBasePost_dB    = 1,  // Base post-amp gain (dB)
-    BloomPreDepth       = 2,  // A: pre-gain reduction depth (dB per envelope unit)
-    BloomPostDepth      = 3,  // B: post-gain compensation depth (dB per envelope unit)
-    EnvAttackMs         = 4,
-    EnvReleaseMs        = 5,
+    BloomBasePre_dB     = 0,  // Baseline pre-amp gain offset (dB)
+    BloomBasePost_dB    = 1,  // Baseline post-amp gain offset (dB)
+    BloomDepth          = 2,  // Max input gain reduction at full envelope (dB)
+    BloomCompensation   = 3,  // Output compensation ratio on input reduction [0, 2]
+    EnvAttackMs         = 4,  // Envelope follower attack time (ms)
+    EnvReleaseMs        = 5,  // Envelope follower release time (ms)
 
     // --- Input Gain ---
     InputGain_dB        = 30,
@@ -57,8 +57,8 @@ inline bool paramIdFromName(std::string_view name, ParamId& out)
     static constexpr Entry kTable[] = {
         { "BloomBasePre_dB",  ParamId::BloomBasePre_dB  },
         { "BloomBasePost_dB", ParamId::BloomBasePost_dB },
-        { "BloomPreDepth",    ParamId::BloomPreDepth    },
-        { "BloomPostDepth",   ParamId::BloomPostDepth   },
+        { "BloomDepth",       ParamId::BloomDepth       },
+        { "BloomCompensation",ParamId::BloomCompensation},
         { "EnvAttackMs",      ParamId::EnvAttackMs      },
         { "EnvReleaseMs",     ParamId::EnvReleaseMs     },
         { "InputGain_dB",     ParamId::InputGain_dB     },
