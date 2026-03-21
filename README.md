@@ -2,7 +2,7 @@
 
 Neural dynamic gain amp platform for Linux / Raspberry Pi.
 
-HexCaster is a DSP-core-first guitar amplifier engine built around Neural Amp Modeling (NAM). It provides dynamic pre/post gain control ("Bloom"), parametric EQ, and algorithmic reverb. The core is real-time safe, framework-independent, and targets embedded deployment on Raspberry Pi 5.
+HexCaster is a DSP-core-first guitar amplifier engine built around Neural Amp Modeling (NAM). It provides a noise gate, dynamic pre/post gain control ("Bloom"), and a mid-sweep EQ. The core is real-time safe, framework-independent, and targets embedded deployment on Raspberry Pi 5 driving a physical guitar cabinet.
 
 Hosting wrappers (LV2, standalone daemon) are thin layers over the DSP core. The LV2 plugin is the primary development and validation target; the standalone runtime is the production deployment target.
 
@@ -11,7 +11,7 @@ Hosting wrappers (LV2, standalone daemon) are thin layers over the DSP core. The
 ```
 hexcaster/
 ├── dsp/
-│   ├── components/     # Individual DSP stages (GainStage, EQ, Reverb, ...)
+│   ├── components/     # Individual DSP stages (GainStage, NamStage, NoiseGate, EQ, ...)
 │   └── pipeline/       # Signal flow composition (Pipeline, BloomController)
 ├── params/             # Parameter system (registry, smoothing, MIDI mapping)
 ├── hosts/
@@ -83,10 +83,28 @@ Separate input and output devices:
   --output-device hw:3,0
 ```
 
-List available ALSA devices:
+With MIDI CC control:
+
+```sh
+./build/hosts/standalone/hexcaster_standalone \
+  --model /path/to/model.nam \
+  --input-device hw:CARD=V276,DEV=0 \
+  --output-device hw:CARD=sndrpihifiberry,DEV=0 \
+  --midi-device hw:1,0,0 \
+  --midi-cc 7:MasterGain_dB \
+  --midi-cc 1:BloomBasePre_dB
+```
+
+List available ALSA audio devices:
 
 ```sh
 ./build/hosts/standalone/hexcaster_standalone --list-devices
+```
+
+List available ALSA MIDI devices:
+
+```sh
+./build/hosts/standalone/hexcaster_standalone --list-midi
 ```
 
 See all options:
@@ -122,33 +140,38 @@ cmake --install build
 
 ## Signal Flow
 
-**Cab Mode** (driving a physical guitar cabinet):
+HexCaster targets Cab Mode: the Pi drives a power amp into a physical guitar cabinet.
 
 ```
-Input → Envelope Follower → Pre-Gain → NAM → Post-Gain → Post EQ → Output
+Input
+  → Noise Gate
+  → Detector HPF (envelope path only)
+  → Envelope Follower
+  → Input Gain (fixed)
+  → Pre-Gain Modulation (Bloom)
+  → Neural Amp Model (NAM)
+  → Post-Gain Compensation (Bloom)
+  → Post EQ (mid-sweep tone shaping)
+  → Master Volume (fixed)
+  → Output → Power Amp → Guitar Cabinet
 ```
 
-**Direct Mode** (headphones / recording):
-
-```
-Input → Envelope Follower → Pre-Gain → NAM → IR Convolution → Reverb → Post EQ → Post-Gain → Output
-```
-
-The Bloom controller drives both pre-gain and post-gain from a single envelope follower, keeping them synchronised:
+The Bloom controller runs a single envelope follower and drives both gain stages in opposite directions, keeping them synchronised:
 
 ```
 PreGain_dB  = BasePre  - A * envelope
 PostGain_dB = BasePost + B * envelope
 ```
 
+The physical cabinet provides speaker filtering. No IR convolution stage.
+
 ## Development Status
 
 | Phase | Status | Scope |
 |-------|--------|-------|
-| 1 | In progress | Envelope, Bloom, EQ, IR convolution |
-| 2 | Done | NAM integration, standalone ALSA host |
-| 3 | Planned | Reverb, dominance-linked control |
-| 4 | Planned | Hardware, MIDI, preset system |
+| 1 | Done | Input Gain, NAM integration, ALSA standalone host, MIDI CC control |
+| 2 | In progress | Noise Gate, mid-sweep EQ, Master Volume |
+| 3 | Planned | Envelope follower, Bloom (pre/post gain modulation), dominance-linked control |
 
 ## Performance Targets (Raspberry Pi 5)
 

@@ -2,7 +2,7 @@
 
 # HexCaster – Neural Dynamic Gain Amp Platform
 
----
+______________________________________________________________________
 
 # 1. Project Overview
 
@@ -10,19 +10,16 @@ HexCaster is a Linux-first, Raspberry Pi–targeted neural guitar amplifier plat
 
 It consists of:
 
-* A real-time safe C++ DSP core
-* Neural Amp Modeling (NAM-compatible inference)
-* Dynamic pre/post gain control ("Bloom" system)
-* IR convolution cabinet simulation
-* Algorithmic reverb
-* Parametric EQ
-* Headless runtime for Raspberry Pi
-* LV2 wrapper for use inside Reaper (Linux)
+- A real-time safe C++ DSP core
+- Neural Amp Modeling (NAM-compatible inference)
+- Dynamic pre/post gain control ("Bloom" system)
+- Headless runtime for Raspberry Pi
+- LV2 wrapper for use inside Reaper (Linux)
 
 The LV2 plugin is for development and validation only.
 The standalone runtime is the primary deployment target.
 
----
+______________________________________________________________________
 
 # 2. Design Philosophy
 
@@ -30,24 +27,15 @@ HexCaster is DSP-core first, not plugin-first.
 
 The DSP library:
 
-* Must be framework-independent
-* Must be real-time safe
-* Must not depend on JUCE or large frameworks
-* Must not allocate memory during processing
-* Must be deterministic
+- Must be framework-independent
+- Must be real-time safe
+- Must not depend on JUCE or large frameworks
+- Must not allocate memory during processing
+- Must be deterministic
 
 Wrappers (LV2, standalone host) are thin layers over the DSP core.
 
----
-
-# 3. High-Level Audio Architecture
-
-HexCaster supports two primary runtime modes:
-
-1. Cab Mode (driving a real guitar speaker cabinet)
-2. Direct Mode (headphones / FRFR / recording output)
-
----
+______________________________________________________________________
 
 ## 3.1 Cab Mode (Physical Guitar Cabinet)
 
@@ -55,62 +43,42 @@ Signal Flow:
 
 Input
 ↓
+Noise Gate (to control for noise pickups)
+↓
 Detector HPF (for envelope only)
 ↓
 Envelope Follower
 ↓
-Pre-Gain Modulation
+Input Gain (fixed by external amp control -- e.g. physical knob)
+↓
+Pre-Gain Modulation (dynamically controlled via envelope follower)
 ↓
 Neural Amp Model (NAM)
 ↓
-Post-Gain Compensation
+Post-Gain Compensation (dynamically controlled via envelope follower)
 ↓
 Post EQ (amp tone shaping)
+↓
+Master Volume (fixed by external amp control -- e.g. physical knob)
 ↓
 Output → Power Amp → Guitar Cab
 
 Notes:
 
-* No IR convolution stage in Cab Mode.
-* The physical cabinet provides the speaker filtering.
-* A high-cut may optionally be provided for fizz control.
+- No IR convolution stage in Cab Mode.
+- The physical cabinet provides the speaker filtering.
+- A high-cut may optionally be provided for fizz control.
 
----
-
-## 3.2 Direct Mode (Headphones / Recording)
-
-Signal Flow:
-
-Input
-↓
-Detector HPF (for envelope only)
-↓
-Envelope Follower
-↓
-Pre-Gain Modulation
-↓
-Neural Amp Model (NAM)
-↓
-IR Convolution (Cab Simulation)
-↓
-Reverb
-↓
-Post EQ
-↓
-Post-Gain Compensation
-↓
-Output
-
----
+______________________________________________________________________
 
 The envelope follower runs once and drives both:
 
-* Pre-gain (negative direction)
-* Post-gain (partial positive compensation)
+- Pre-gain (negative direction)
+- Post-gain (partial positive compensation)
 
 This guarantees synchronization and prevents envelope mismatch artifacts.
 
----
+______________________________________________________________________
 
 # 4. Core DSP Modules
 
@@ -118,45 +86,45 @@ This guarantees synchronization and prevents envelope mismatch artifacts.
 
 Requirements:
 
-* Peak-based detection
-* Configurable attack and release
-* Optional lookahead (1–3 ms buffer)
-* Output normalized to [0.0, 1.0]
-* No dynamic allocation
-* No STL resizing in audio thread
+- Peak-based detection
+- Configurable attack and release
+- Optional lookahead (1–3 ms buffer)
+- Output normalized to [0.0, 1.0]
+- No dynamic allocation
+- No STL resizing in audio thread
 
 Detector Pre-Filtering (applies ONLY to envelope path, not audio path):
 
-* High-pass filter (recommended 70–150 Hz)
-* Optional low-pass filter (e.g., 4–8 kHz) to reduce pick-noise spikes
+- High-pass filter (recommended 70–150 Hz)
+- Optional low-pass filter (e.g., 4–8 kHz) to reduce pick-noise spikes
 
 Purpose:
 
-* Prevent low-frequency thumps from dominating envelope
-* Improve transient detection stability
-* Make envelope respond to musical energy rather than sub content
+- Prevent low-frequency thumps from dominating envelope
+- Improve transient detection stability
+- Make envelope respond to musical energy rather than sub content
 
 Envelope output drives:
 
-PreGain_dB  = BasePre  - A * envelope
+PreGain_dB = BasePre - A * envelope
 PostGain_dB = BasePost + B * envelope
 
 Both must be clamped to safe limits.
 
----
+______________________________________________________________________
 
 ## 4.2 Gain Stage
 
 Requirements:
 
-* Internal representation in linear gain
-* Parameter input in dB
-* Smoothed transitions
-* Hard clamp on min/max gain
-* No -inf behavior
-* No denormals
+- Internal representation in linear gain
+- Parameter input in dB
+- Smoothed transitions
+- Hard clamp on min/max gain
+- No -inf behavior
+- No denormals
 
----
+______________________________________________________________________
 
 ## 4.3 Neural Amp Model Integration
 
@@ -164,21 +132,21 @@ HexCaster uses the **NeuralAudio** library as the primary inference engine for l
 
 NeuralAudio references:
 
-* README: [https://raw.githubusercontent.com/mikeoliphant/NeuralAudio/refs/heads/release/README.md](https://raw.githubusercontent.com/mikeoliphant/NeuralAudio/refs/heads/release/README.md)
-* Repository (SSH): [git@github.com](mailto:git@github.com):mikeoliphant/NeuralAudio.git
-* Repository (HTTPS): [https://github.com/mikeoliphant/NeuralAudio](https://github.com/mikeoliphant/NeuralAudio)
+- README: [https://raw.githubusercontent.com/mikeoliphant/NeuralAudio/refs/heads/release/README.md](https://raw.githubusercontent.com/mikeoliphant/NeuralAudio/refs/heads/release/README.md)
+- Repository (SSH): [git@github.com](mailto:git@github.com):mikeoliphant/NeuralAudio.git
+- Repository (HTTPS): [https://github.com/mikeoliphant/NeuralAudio](https://github.com/mikeoliphant/NeuralAudio)
 
 NeuralAudio supports:
 
-* NAM WaveNet models (.nam files)
-* NAM LSTM models
-* RTNeural keras LSTM/GRU models
+- NAM WaveNet models (.nam files)
+- NAM LSTM models
+- RTNeural keras LSTM/GRU models
 
 Preferred configuration:
 
-* Use NeuralAudio internal implementation (default)
-* Enable static RTNeural builds for optimized architectures
-* Avoid NAM Core fallback unless benchmarking
+- Use NeuralAudio internal implementation (default)
+- Enable static RTNeural builds for optimized architectures
+- Avoid NAM Core fallback unless benchmarking
 
 CMake recommendation:
 
@@ -186,16 +154,16 @@ CMake recommendation:
 
 Model loading requirements:
 
-* Model loaded at initialization only
-* No allocation or model changes inside process()
-* Maximum buffer size set during initialization
-* Reject unsupported or overly heavy models at load time
+- Model loaded at initialization only
+- No allocation or model changes inside process()
+- Maximum buffer size set during initialization
+- Reject unsupported or overly heavy models at load time
 
 Performance guidance for Raspberry Pi 5:
 
-* Prefer Nano / Feather / Lite WaveNet models
-* Prefer small LSTM models (1x8, 1x12)
-* Benchmark Standard models before allowing in production
+- Prefer Nano / Feather / Lite WaveNet models
+- Prefer small LSTM models (1x8, 1x12)
+- Benchmark Standard models before allowing in production
 
 The DSP core must treat NeuralAudio as a deterministic, real-time-safe processing unit:
 
@@ -203,210 +171,178 @@ model->Process(inputPtr, outputPtr, numSamples);
 
 Inference must complete within the audio buffer deadline.
 
----
+______________________________________________________________________
 
-## 4.4 IR Convolution
+## 4.6 EQ
 
-Implementation:
+Implemented as mid-sweep EQ:
 
-* Partitioned convolution (uniform partition acceptable initially)
-* Pre-allocated buffers
-* Fixed maximum IR length
-* No dynamic allocation during processing
+- Gain range: ±12 dB (controllable parameter)
+- Mid sweep range: 300 Hz → 2.5 kHz (controllable parameter)
+- Q: ~0.8–1.0 (fixed)
 
----
-
-## 4.5 Reverb
-
-Initial implementation:
-
-* Lightweight algorithmic reverb (Freeverb-style acceptable)
-* CPU efficient
-* Deterministic
-* No dynamic memory
-
----
-
-## 4.6 Parametric EQ
-
-Two conceptual EQ stages may exist:
-
-1. Pre-Distortion EQ (Input Shaping)
-2. Post-Distortion EQ (Tone Shaping)
-
-### Pre-Distortion EQ (Optional, Minimal Initially)
-
-Purpose:
-
-* Tighten low end before distortion
-* Shape how NAM saturates
-* Control harshness generation
-
-Initial implementation may include:
-
-* High-pass filter
-* Optional low-shelf
-
-### Post-Distortion EQ (Primary Tone Control)
-
-* 3–5 band biquad implementation
-* Pre-computed coefficients
-* Coefficient smoothing
-* Stable at extreme parameter values
-
-This EQ acts as the "amp tone stack" control layer.
-
----
+______________________________________________________________________
 
 # 5. Real-Time Safety Rules (Strict)
 
 Inside process():
 
-* No malloc/new
-* No std::vector resize
-* No locks
-* No file I/O
-* No logging
-* No printf
-* No blocking calls
-* No exceptions
+- No malloc/new
+- No std::vector resize
+- No locks
+- No file I/O
+- No logging
+- No printf
+- No blocking calls
+- No exceptions
 
 Denormals must be prevented (flush-to-zero or tiny DC offset).
 
 Audio thread must be:
 
-* Lock-free
-* Deterministic
-* Bounded-time
+- Lock-free
+- Deterministic
+- Bounded-time
 
----
+______________________________________________________________________
 
 # 6. Repository Layout
 
 hexcaster/
 │
 ├── CMakeLists.txt
+├── cmake/
+│   └── dependencies.cmake        # FetchContent for NeuralAudio
 │
 ├── dsp/
-│   ├── include/
-│   │   ├── envelope.h
-│   │   ├── gain_stage.h
-│   │   ├── ir_convolver.h
-│   │   ├── reverb.h
-│   │   ├── eq.h
-│   │   └── hexcaster_processor.h
+│   ├── CMakeLists.txt
+│   ├── components/               # Individual DSP stages (hexcaster_components)
+│   │   ├── include/hexcaster/
+│   │   │   ├── processor_stage.h # Abstract stage interface
+│   │   │   ├── gain_stage.h
+│   │   │   ├── nam_stage.h       # NeuralAudio wrapper
+│   │   │   ├── envelope.h        # (stub -- Phase 3)
+│   │   │   ├── eq.h              # (stub -- Phase 2)
+│   │   │   └── noise_gate.h      # (stub -- Phase 2)
+│   │   └── src/
+│   │       ├── gain_stage.cpp
+│   │       └── nam_stage.cpp
 │   │
+│   └── pipeline/                 # Signal flow composition (hexcaster_pipeline)
+│       ├── include/hexcaster/
+│       │   ├── pipeline.h        # Ordered stage chain + controller hooks
+│       │   └── bloom_controller.h # Pre/post gain coordinator (stub -- Phase 3)
+│       └── src/
+│           └── pipeline.cpp
+│
+├── params/                       # Parameter system (hexcaster_params)
+│   ├── CMakeLists.txt
+│   ├── include/hexcaster/
+│   │   ├── param_id.h            # ParamId enum + name lookup table
+│   │   ├── param_registry.h      # Atomic float store
+│   │   ├── param_smoother.h      # Per-sample EMA smoother
+│   │   └── midi_map.h            # CC-to-ParamId mapping
 │   └── src/
-│       ├── envelope.cpp
-│       ├── gain_stage.cpp
-│       ├── ir_convolver.cpp
-│       ├── reverb.cpp
-│       ├── eq.cpp
-│       └── hexcaster_processor.cpp
+│       ├── param_registry.cpp
+│       ├── param_smoother.cpp
+│       └── midi_map.cpp
 │
-├── lv2/
-│   ├── manifest.ttl
-│   ├── hexcaster.ttl
-│   └── hexcaster_lv2.cpp
+├── hosts/
+│   ├── lv2/                      # LV2 plugin (development/validation)
+│   │   ├── CMakeLists.txt
+│   │   ├── manifest.ttl
+│   │   ├── hexcaster.ttl
+│   │   └── hexcaster_lv2.cpp
+│   │
+│   └── standalone/               # Headless runtime (primary deployment)
+│       ├── CMakeLists.txt
+│       ├── audio_engine.h        # Abstract AudioEngine interface
+│       ├── alsa_audio_engine.h   # ALSA backend
+│       ├── alsa_audio_engine.cpp
+│       ├── midi_input.h          # ALSA raw MIDI reader
+│       ├── midi_input.cpp
+│       └── main.cpp
 │
-├── standalone/
-│   ├── main.cpp
-│   └── audio_engine.cpp
+├── tests/
+│   ├── CMakeLists.txt
+│   └── test_passthrough.cpp
 │
-└── external/
-└── (RTNeural or NAM runtime)
+└── external/                     # Empty -- NeuralAudio fetched via FetchContent
 
----
+______________________________________________________________________
 
 # 7. Build System (CMake)
 
 Targets:
 
-* hexcaster_dsp (static or shared library)
-* hexcaster_lv2 (MODULE, links dsp)
-* hexcaster_standalone (executable, links dsp)
+- hexcaster_params (static lib: param registry, smoother, MIDI map)
+- hexcaster_components (static lib: DSP stages, links NeuralAudio)
+- hexcaster_pipeline (static lib: signal flow composition, links components + params)
+- hexcaster_lv2 (MODULE: LV2 plugin, links pipeline + params)
+- hexcaster_standalone (executable: ALSA runtime, links pipeline + params)
+- hexcaster_tests (executable: unit tests)
 
-High-level CMake structure:
+Build options (all default ON):
 
-add_library(hexcaster_dsp STATIC
-dsp/src/envelope.cpp
-dsp/src/gain_stage.cpp
-dsp/src/ir_convolver.cpp
-dsp/src/reverb.cpp
-dsp/src/eq.cpp
-dsp/src/hexcaster_processor.cpp
-)
+-DHEXCASTER_BUILD_LV2=ON
+-DHEXCASTER_BUILD_STANDALONE=ON
+-DHEXCASTER_BUILD_TESTS=ON
 
-target_include_directories(hexcaster_dsp PUBLIC dsp/include)
+NeuralAudio is fetched automatically via CMake FetchContent on first configure.
+No submodules required. Pinned to a specific release commit.
 
-add_library(hexcaster_lv2 MODULE
-lv2/hexcaster_lv2.cpp
-)
+LV2 bundle auto-installs to ~/.lv2/hexcaster.lv2/ after each build.
+LV2 build is skipped gracefully if lv2 headers are not installed.
 
-target_link_libraries(hexcaster_lv2 PRIVATE hexcaster_dsp)
-
-add_executable(hexcaster_standalone
-standalone/main.cpp
-)
-
-target_link_libraries(hexcaster_standalone PRIVATE hexcaster_dsp)
-
-LV2 bundle should install to:
-
-~/.lv2/hexcaster.lv2/
-
----
+______________________________________________________________________
 
 # 8. Parameter Architecture
 
-* Parameters stored as std::atomic<float>
-* Smoothed inside DSP
-* Control thread writes only
-* Audio thread reads only
-* No locks
+- Parameters stored as std::atomic<float>
+- Smoothed inside DSP
+- Control thread writes only
+- Audio thread reads only
+- No locks
+- MIDI CC → ParamId mapping implemented (MidiMap + MidiInput in standalone host)
+- CLI: --midi-device, --midi-cc <cc>:<ParamName> (repeatable)
 
 Future expansion:
 
-* Dominance metric input
-* MIDI CC mapping
-* External hardware control
+- Dominance metric input
+- External hardware control (physical knobs/pedals)
+- Preset storage
 
----
+______________________________________________________________________
 
 # 9. Development Phases
 
 Phase 1:
 
-* Envelope + Pre/Post gain
-* Basic EQ
-* IR convolution
+- Input Gain
+- NAM integration
+- Performance profiling on Pi
 
 Phase 2:
 
-* NAM integration
-* Performance profiling on Pi
+- Noise Gate
+- EQ
+- Master Volume
 
 Phase 3:
 
-* Reverb refinement
-* Dominance-linked envelope control
+- Envelope + Pre/Post gain modulation stages
+- Dominance-linked envelope control
 
-Phase 4:
-
-* Hardware integration
-* MIDI routing
-* Preset system
-
----
+______________________________________________________________________
 
 # 10. Performance Targets (Raspberry Pi 5)
 
-* 48 kHz
-* 64–128 sample buffers
-* < 50% CPU total
-* < 5 ms system latency
+- 48 kHz
+- 64–128 sample buffers
+- < 50% CPU total
+- < 5 ms system latency
 
----
+______________________________________________________________________
 
 # 11. Long-Term Direction
 
@@ -414,22 +350,20 @@ HexCaster is an embedded DSP engine.
 
 It may eventually support:
 
-* Multi-model switching
-* Per-string dominance control
-* External control surfaces
-* Head unit UI
-* Preset storage
+- Multi-model switching
+- Per-string dominance control
+- External control surfaces
+- Head unit UI
+- Preset storage
 
 But the core must remain:
 
-* Minimal
-* Portable
-* Real-time safe
-* Independent of large frameworks
+- Minimal
+- Portable
+- Real-time safe
+- Independent of large frameworks
 
----
-
----
+______________________________________________________________________
 
 # 12. External Dependencies
 
@@ -439,21 +373,21 @@ The following external libraries and systems are used by HexCaster:
 
 Purpose:
 
-* Load and run NAM-compatible models in real-time
+- Load and run NAM-compatible models in real-time
 
 Repository:
 
-* SSH: [git@github.com](mailto:git@github.com):mikeoliphant/NeuralAudio.git
-* HTTPS: [https://github.com/mikeoliphant/NeuralAudio](https://github.com/mikeoliphant/NeuralAudio)
+- SSH: [git@github.com](mailto:git@github.com):mikeoliphant/NeuralAudio.git
+- HTTPS: [https://github.com/mikeoliphant/NeuralAudio](https://github.com/mikeoliphant/NeuralAudio)
 
 README:
 
-* [https://raw.githubusercontent.com/mikeoliphant/NeuralAudio/refs/heads/release/README.md](https://raw.githubusercontent.com/mikeoliphant/NeuralAudio/refs/heads/release/README.md)
+- [https://raw.githubusercontent.com/mikeoliphant/NeuralAudio/refs/heads/release/README.md](https://raw.githubusercontent.com/mikeoliphant/NeuralAudio/refs/heads/release/README.md)
 
 Build configuration guidance:
 
-* Enable static RTNeural builds: -DBUILD_STATIC_RTNEURAL=ON
-* Avoid enabling NAMCore unless benchmarking
+- Enable static RTNeural builds: -DBUILD_STATIC_RTNEURAL=ON
+- Avoid enabling NAMCore unless benchmarking
 
 NeuralAudio must be treated as an initialization-time dependency only. Model loading and configuration must not occur inside the audio processing thread.
 
@@ -461,17 +395,17 @@ NeuralAudio must be treated as an initialization-time dependency only. Model loa
 
 Standalone runtime will interface with:
 
-* ALSA
-* JACK or PipeWire (JACK-compatible mode)
+- ALSA
+- JACK or PipeWire (JACK-compatible mode)
 
 Audio backend responsibilities:
 
-* Buffer management
-* Device selection
-* Real-time thread priority
+- Buffer management
+- Device selection
+- Real-time thread priority
 
 DSP core must remain completely independent of the audio backend implementation.
 
----
+______________________________________________________________________
 
 End of AGENTS.md
