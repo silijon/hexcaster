@@ -132,11 +132,17 @@ private:
     float sampleRate_ = 48000.f;
 
     // Stage 1: fast peak detector (fixed time constants, not user-controlled)
-    static constexpr float kDetectorAttackMs  = 0.1f;   // near-instantaneous peak capture
-    static constexpr float kDetectorReleaseMs = 10.f;   // fast release to track note endings
+    static constexpr float kDetectorAttackMs  =  0.1f;  // near-instantaneous peak capture
+    static constexpr float kDetectorReleaseMs = 30.f;   // fast-ish release; bumped from 10ms
+                                                         // to reduce per-cycle ripple on sustain
+    static constexpr float kDetectorSmoothMs  = 15.f;   // one-pole LPF on detector output
+                                                         // removes residual ripple before
+                                                         // feeding the gain envelope
     float detectorEnv_           = 0.f;
+    float smoothedDetEnv_        = 0.f;   // LPF-smoothed detector output
     float detectorAttackCoeff_   = 0.f;   // computed once in prepare()
     float detectorReleaseCoeff_  = 0.f;   // computed once in prepare()
+    float detectorSmoothCoeff_   = 0.f;   // computed once in prepare()
 
     // Stage 2: gain envelope (user BloomAttackMs / BloomReleaseMs control this)
     float gainEnv_           = 0.f;

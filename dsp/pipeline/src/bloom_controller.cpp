@@ -27,6 +27,7 @@ void BloomController::prepare(float sampleRate, int /*maxBlockSize*/)
     // Compute fixed detector coefficients (not user-controlled)
     detectorAttackCoeff_  = msToCoeff(kDetectorAttackMs,  sampleRate_);
     detectorReleaseCoeff_ = msToCoeff(kDetectorReleaseMs, sampleRate_);
+    detectorSmoothCoeff_  = msToCoeff(kDetectorSmoothMs,  sampleRate_);
 
     cachedAttackMs_  = -1.f;  // force gain envelope coefficient recompute on first block
     cachedReleaseMs_ = -1.f;
@@ -35,10 +36,11 @@ void BloomController::prepare(float sampleRate, int /*maxBlockSize*/)
 
 void BloomController::reset()
 {
-    detectorEnv_ = 0.f;
-    gainEnv_     = 0.f;
-    hpfX1_       = 0.f;
-    hpfY1_       = 0.f;
+    detectorEnv_   = 0.f;
+    smoothedDetEnv_ = 0.f;
+    gainEnv_       = 0.f;
+    hpfX1_         = 0.f;
+    hpfY1_         = 0.f;
 }
 
 // ---------------------------------------------------------------------------
@@ -67,8 +69,9 @@ void BloomController::preProcess(const float* buffer, int numSamples)
     // Run detector HPF + two-stage envelope per-sample across the block.
     // The HPF is applied to the detection signal only -- the audio buffer
     // is const and is not modified.
-    float detEnv  = detectorEnv_;
-    float gainEnv = gainEnv_;
+    float detEnv      = detectorEnv_;
+    float smoothedDet = smoothedDetEnv_;
+    float gainEnv     = gainEnv_;
 
     for (int i = 0; i < numSamples; ++i) {
         // Stage 1a: detector HPF (sidechain only, not audio path)
@@ -79,33 +82,43 @@ void BloomController::preProcess(const float* buffer, int numSamples)
 
         // Stage 1b: fast peak detector.
         // Sensitivity scales the detection signal to normalise raw ADC amplitude.
-        // Uses fixed short attack/release so it responds near-instantaneously to
-        // note onsets -- the detector answers "is there signal?"
+        // Near-instantaneous attack (0.1ms) captures note onsets immediately.
+        // Release is 30ms -- fast enough to track amplitude changes but slow
+        // enough to reduce per-cycle harmonic ripple on sustained notes.
         const float absSample = (hpfOut < 0.f ? -hpfOut : hpfOut) * sensitivityLin;
         if (absSample > detEnv)
             detEnv = detectorAttackCoeff_  * detEnv + (1.f - detectorAttackCoeff_)  * absSample;
         else
             detEnv = detectorReleaseCoeff_ * detEnv + (1.f - detectorReleaseCoeff_) * absSample;
 
+        // Stage 1c: one-pole LPF on detector output (15ms).
+        // Removes residual harmonic-beating ripple from the detector signal
+        // before it reaches the gain envelope. The LPF adds ~15ms of latency
+        // on the decay side only -- note onsets are still captured fast because
+        // the raw detector (detEnv) rises instantly and pulls smoothedDet up.
+        smoothedDet = detectorSmoothCoeff_ * smoothedDet
+                    + (1.f - detectorSmoothCoeff_) * detEnv;
+
         // Stage 2: gain envelope (user attack/release shape the gain response).
-        // Attack: ramp toward the detector value at the user attack rate.
-        // Release: decay toward zero at the user release rate -- completely
-        //   independent of the detector's waveform. This gives a clean
-        //   exponential decay contour rather than tracking the audio envelope.
-        if (detEnv > gainEnv)
-            gainEnv = gainAttackCoeff_  * gainEnv + (1.f - gainAttackCoeff_)  * detEnv;
+        // Uses smoothedDet (not raw detEnv) to avoid ripple-driven re-triggering
+        // of the attack branch during note decay.
+        // Attack: ramp toward smoothedDet at the user attack rate.
+        // Release: decay toward zero at the user release rate, independently.
+        if (smoothedDet > gainEnv)
+            gainEnv = gainAttackCoeff_  * gainEnv + (1.f - gainAttackCoeff_)  * smoothedDet;
         else
             gainEnv = gainReleaseCoeff_ * gainEnv;
     }
 
-    detectorEnv_ = detEnv;
-    gainEnv_     = gainEnv;
+    detectorEnv_    = detEnv;
+    smoothedDetEnv_ = smoothedDet;
+    gainEnv_        = gainEnv;
 
     // Publish both envelopes for TUI observation (relaxed -- no ordering required).
-    // detEnv: fast audio tracker -- shows what the signal is doing.
-    // gainEnv: gain-driving envelope -- shows what bloom is actually doing.
-    observedDetectorEnv_.store(std::clamp(detEnv,  0.f, 1.f), std::memory_order_relaxed);
-    observedEnvelope_.store   (std::clamp(gainEnv, 0.f, 1.f), std::memory_order_relaxed);
+    // smoothedDet: what the gain envelope sees -- smooth audio tracker.
+    // gainEnv: the gain-driving envelope (user attack/release).
+    observedDetectorEnv_.store(std::clamp(smoothedDet, 0.f, 1.f), std::memory_order_relaxed);
+    observedEnvelope_.store   (std::clamp(gainEnv,     0.f, 1.f), std::memory_order_relaxed);
 
     // Clamp for the gain formulas (safety net -- gainEnv should already be [0,1]).
     const float clampedEnv = std::clamp(gainEnv, 0.f, 1.f);
