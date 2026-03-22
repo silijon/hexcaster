@@ -510,9 +510,11 @@ int main(int argc, char** argv)
             d.noiseGateHold        = params.get(hexcaster::ParamId::NoiseGateHoldMs);
             d.inputGain            = params.get(hexcaster::ParamId::InputGain_dB);
             d.masterVolume         = params.get(hexcaster::ParamId::MasterVolume_dB);
-            d.bloomEnvelope        = bloom.getEnvelope();
-            d.bloomBasePre         = params.get(hexcaster::ParamId::BloomBasePre_dB);
-            d.bloomBasePost        = params.get(hexcaster::ParamId::BloomBasePost_dB);
+            d.bloomEnvelope          = bloom.getEnvelope();
+            d.bloomBasePre           = params.get(hexcaster::ParamId::BloomBasePre_dB);
+            d.bloomBasePost          = params.get(hexcaster::ParamId::BloomBasePost_dB);
+            d.bloomPreGainApplied    = bloomPreGain.getGainDb();
+            d.bloomPostGainApplied   = bloomPostGain.getGainDb();
             d.bloomDepth           = params.get(hexcaster::ParamId::BloomDepth);
             d.bloomCompensation    = params.get(hexcaster::ParamId::BloomCompensation);
             d.bloomSensitivity     = params.get(hexcaster::ParamId::BloomSensitivity_dB);

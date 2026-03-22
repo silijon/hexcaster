@@ -7,18 +7,33 @@ namespace hexcaster::tui {
 
 std::vector<MeterDesc> buildBloomScreenMeters()
 {
+    // Applied pre/post gain range: matches GainStage clamp limits [-60, +24] dB.
+    // This covers every value the BloomController can ever write to these stages.
+    constexpr float kGainMin = -60.f;
+    constexpr float kGainMax =  24.f;
+
     return {
         // Envelope: observation-only, [0,1]
         MeterDesc::fromObservation("Envelope",
             [](const MeterData& d) { return d.bloomEnvelope; },
             ""),
 
-        // Bloom parameters (all adjustable unless MIDI-mapped)
-        MeterDesc::fromParam("Pre Gain",  ParamId::BloomBasePre_dB,    " dB"),
-        MeterDesc::fromParam("Post Gain", ParamId::BloomBasePost_dB,   " dB"),
-        MeterDesc::fromParam("Depth",     ParamId::BloomDepth,         " dB"),
-        MeterDesc::fromParam("Comp",      ParamId::BloomCompensation,  ""),
-        MeterDesc::fromParam("Sensitiv.", ParamId::BloomSensitivity_dB," dB"),
+        // Applied pre/post gain: what the BloomController actually set last block.
+        // Falls as envelope rises (pre) and rises (post) -- shows dynamic action.
+        MeterDesc::fromObservationRanged("Pre dB",
+            [](const MeterData& d) { return d.bloomPreGainApplied; },
+            kGainMin, kGainMax, " dB"),
+
+        MeterDesc::fromObservationRanged("Post dB",
+            [](const MeterData& d) { return d.bloomPostGainApplied; },
+            kGainMin, kGainMax, " dB"),
+
+        // Tuning parameters (adjustable unless MIDI-mapped)
+        MeterDesc::fromParam("Depth",     ParamId::BloomDepth,          " dB"),
+        MeterDesc::fromParam("Comp",      ParamId::BloomCompensation,   ""),
+        MeterDesc::fromParam("Sensitiv.", ParamId::BloomSensitivity_dB, " dB"),
+        MeterDesc::fromParam("Env Atk",  ParamId::EnvAttackMs,          " ms"),
+        MeterDesc::fromParam("Env Rel",  ParamId::EnvReleaseMs,          " ms"),
     };
 }
 

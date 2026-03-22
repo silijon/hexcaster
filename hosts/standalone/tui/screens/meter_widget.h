@@ -215,10 +215,18 @@ inline ftxui::Element makeMeterRow(const std::vector<MeterDesc>& meters,
                 normValue = std::clamp((rawValue - range.min) / (range.max - range.min), 0.f, 1.f);
             midi = midiMap.isMapped(m.paramId);
         } else {
-            // Observation getter: value already in [0, 1]
-            rawValue  = m.valueGetter(data);
-            normValue = std::clamp(rawValue, 0.f, 1.f);
-            readOnly  = true;
+            rawValue = m.valueGetter(data);
+            if (m.observationRange) {
+                // Getter returns a raw physical value; normalize using explicit range.
+                const float span = m.observationRange->max - m.observationRange->min;
+                normValue = (span > 0.f)
+                    ? std::clamp((rawValue - m.observationRange->min) / span, 0.f, 1.f)
+                    : 0.f;
+            } else {
+                // Getter returns a value already in [0, 1].
+                normValue = std::clamp(rawValue, 0.f, 1.f);
+            }
+            readOnly = true;
         }
 
         const std::string disp = fmtValue(rawValue, m.unit);

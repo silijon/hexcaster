@@ -3,8 +3,9 @@
 #include "hexcaster/param_id.h"
 #include "hexcaster/param_registry.h"
 
-#include <string>
 #include <functional>
+#include <optional>
+#include <string>
 
 namespace hexcaster::tui {
 
@@ -29,10 +30,12 @@ struct MeterData {
     float inputGain          = 0.f; // dB
     float masterVolume       = 0.f; // dB
 
-    float bloomEnvelope      = 0.f; // [0, 1] (observation atomic)
-    float bloomBasePre       = 0.f; // dB
-    float bloomBasePost      = 0.f; // dB
-    float bloomDepth         = 0.f; // dB
+    float bloomEnvelope        = 0.f;   // [0, 1] (observation atomic)
+    float bloomBasePre         = 0.f;   // dB (base offset param)
+    float bloomBasePost        = 0.f;   // dB (base offset param)
+    float bloomPreGainApplied  = 0.f;   // dB -- actual gain set on bloomPreGain stage this block
+    float bloomPostGainApplied = 0.f;   // dB -- actual gain set on bloomPostGain stage this block
+    float bloomDepth           = 0.f;   // dB
     float bloomCompensation  = 0.f; // ratio
     float bloomSensitivity   = 0.f; // dB
     float envAttack          = 0.f; // ms
@@ -72,9 +75,19 @@ struct MeterDesc {
     // j/k can write via registry.set(paramId, ...).
     ParamId paramId = ParamId::kCount;
 
-    // For observation-only meters: provides the current value [0, 1] directly.
+    // For observation-only meters: provides the raw value for display.
+    // - When observationRange is absent: getter returns a value already in [0, 1]
+    //   (used for envelope [0,1], gate gain [0,1]).
+    // - When observationRange is set: getter returns the raw value in physical units
+    //   (e.g. dB); normalization is done using the range for bar height, and the
+    //   raw value is shown as the numeric readout.
     // Ignored when paramId != kCount.
     std::function<float(const MeterData&)> valueGetter;
+
+    // Optional explicit range for observation meters whose getter returns a
+    // physical value (not already [0, 1]).
+    struct ObservationRange { float min; float max; };
+    std::optional<ObservationRange> observationRange;
 
     // When true: j/k adjustment is blocked regardless of MIDI mapping.
     // Set for observation-only meters (envelope, gate gain/state).
@@ -94,7 +107,7 @@ struct MeterDesc {
         return d;
     }
 
-    /** Create a read-only observation meter with a fixed [0,1] value range. */
+    /** Create a read-only observation meter whose getter returns [0, 1]. */
     static MeterDesc fromObservation(const char* label,
                                      std::function<float(const MeterData&)> getter,
                                      const char* unit = "") {
@@ -104,6 +117,25 @@ struct MeterDesc {
         d.valueGetter    = std::move(getter);
         d.alwaysReadOnly = true;
         d.unit           = unit;
+        return d;
+    }
+
+    /**
+     * Create a read-only observation meter whose getter returns a raw physical
+     * value (e.g. dB). The bar is normalized using [rangeMin, rangeMax].
+     * The numeric readout shows the raw value + unit.
+     */
+    static MeterDesc fromObservationRanged(const char* label,
+                                           std::function<float(const MeterData&)> getter,
+                                           float rangeMin, float rangeMax,
+                                           const char* unit = "") {
+        MeterDesc d;
+        d.label             = label;
+        d.paramId           = ParamId::kCount;
+        d.valueGetter       = std::move(getter);
+        d.observationRange  = ObservationRange{ rangeMin, rangeMax };
+        d.alwaysReadOnly    = true;
+        d.unit              = unit;
         return d;
     }
 
