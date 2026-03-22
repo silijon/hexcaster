@@ -60,6 +60,58 @@ inline ftxui::Color barColor(float norm)
 }
 
 /**
+ * Choose bar color for signal level meters using audio-convention thresholds.
+ * Input: normalised position on the -60..0 dB scale, i.e.
+ *   norm = (db - (-60)) / (0 - (-60))  = (db + 60) / 60
+ *
+ * Threshold mapping:
+ *   -3 dB  -> norm = 57/60 = 0.950  -> red above this
+ *   -12 dB -> norm = 48/60 = 0.800  -> yellow above this
+ *   below  -> green
+ */
+inline ftxui::Color barColorSignal(float norm)
+{
+    if (norm >= 0.950f) return ftxui::Color::Red;
+    if (norm >= 0.800f) return ftxui::Color::Yellow;
+    return ftxui::Color::Green;
+}
+
+/**
+ * Render one signal-level meter column (input or output).
+ * Uses audio-convention coloring and a fixed -60..0 dB display range.
+ * Always read-only — no MIDI tag, no selection indicator.
+ *
+ * @param label    Short label ("In" or "Out")
+ * @param db       Current level in dB (clamped to [-60, 0])
+ */
+inline ftxui::Element makeSignalMeter(const std::string& label, float db)
+{
+    using namespace ftxui;
+
+    // Normalise to [0, 1] on the -60..0 dB scale
+    constexpr float kFloor   = -60.f;
+    constexpr float kCeiling =   0.f;
+    const float norm = std::clamp((db - kFloor) / (kCeiling - kFloor), 0.f, 1.f);
+
+    const Color barCol = barColorSignal(norm);
+
+    auto bar = gaugeUp(norm)
+             | color(barCol)
+             | size(WIDTH,  EQUAL, kMeterBarWidth)
+             | size(HEIGHT, EQUAL, kMeterBarHeight);
+
+    auto framedBar = bar | border;
+
+    const std::string dbStr = fmtValue(db, " dB");
+
+    Elements rows;
+    rows.push_back(text(label) | hcenter | bold);
+    rows.push_back(framedBar   | hcenter);
+    rows.push_back(text(dbStr) | hcenter | dim);
+    return vbox(std::move(rows)) | size(WIDTH, EQUAL, kMeterBarWidth + 4);
+}
+
+/**
  * Short string representation of gate state.
  * The int corresponds to NoiseGate::State cast to uint8_t.
  */

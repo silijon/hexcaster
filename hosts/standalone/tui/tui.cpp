@@ -2,6 +2,7 @@
 #include "screens/main_screen.h"
 #include "screens/eq_screen.h"
 #include "screens/bloom_screen.h"
+#include "screens/meter_widget.h"
 
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/event.hpp>
@@ -134,16 +135,24 @@ ftxui::Component Tui::buildRoot()
     // Use a CatchEvent component so we handle all keyboard input ourselves.
     auto renderer = ftxui::Renderer([this] {
         auto helpBar = ftxui::hbox(ftxui::Elements{
-            ftxui::text(" { prev  "),
-            ftxui::text("} next  "),
+            ftxui::text(" [ prev  "),
+            ftxui::text("] next  "),
             ftxui::text("Tab sel  "),
             ftxui::text("j/k adj  "),
             ftxui::text("q quit"),
         }) | ftxui::dim;
+
+        // Body: fixed signal panel on the left, current screen on the right
+        auto body = ftxui::hbox(ftxui::Elements{
+            renderSignalPanel(),
+            ftxui::separator(),
+            renderCurrentScreen() | ftxui::flex,
+        });
+
         return ftxui::vbox(ftxui::Elements{
             renderHeader(),
             ftxui::separator(),
-            renderCurrentScreen(),
+            body | ftxui::flex,
             ftxui::separator(),
             helpBar,
         });
@@ -198,6 +207,24 @@ ftxui::Element Tui::renderHeader()
 }
 
 // ---------------------------------------------------------------------------
+// Signal panel (fixed left column -- always visible)
+// ---------------------------------------------------------------------------
+
+ftxui::Element Tui::renderSignalPanel()
+{
+    using namespace ftxui;
+
+    auto inMeter  = makeSignalMeter("In",  snapshot_.inputLevelDb);
+    auto outMeter = makeSignalMeter("Out", snapshot_.outputLevelDb);
+
+    Elements rows;
+    rows.push_back(text(" Sig ") | bold | hcenter);
+    rows.push_back(text(""));
+    rows.push_back(hbox(Elements{ inMeter, text(" "), outMeter }));
+    return vbox(std::move(rows));
+}
+
+// ---------------------------------------------------------------------------
 // Current screen
 // ---------------------------------------------------------------------------
 
@@ -227,13 +254,13 @@ bool Tui::handleEvent(ftxui::Event e)
         return true;
     }
 
-    // Screen navigation: } = next, { = previous  (Shift+] and Shift+[)
-    if (e == ftxui::Event::Character('}')) {
+    // Screen navigation: ] = next, [ = previous
+    if (e == ftxui::Event::Character(']')) {
         currentScreen_ = (currentScreen_ + 1) % static_cast<int>(screens_.size());
         selectedMeter_ = 0;
         return true;
     }
-    if (e == ftxui::Event::Character('{')) {
+    if (e == ftxui::Event::Character('[')) {
         int n = static_cast<int>(screens_.size());
         currentScreen_ = (currentScreen_ + n - 1) % n;
         selectedMeter_ = 0;

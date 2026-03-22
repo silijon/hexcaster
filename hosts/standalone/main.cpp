@@ -16,6 +16,8 @@
 #include "tui/tui.h"
 #endif
 
+#include "level_meter.h"
+
 #include <atomic>
 #include <csignal>
 #include <cstdio>
@@ -435,6 +437,10 @@ int main(int argc, char** argv)
                       static_cast<int>(engine.actualBufferFrames()));
     }
 
+    // Signal level meters -- measured in the audio callback, read by TUI.
+    hexcaster::LevelMeter inputMeter;
+    hexcaster::LevelMeter outputMeter;
+
     // Audio callback: sync params -> stages each block, then process.
     // Param reads are atomic; no locks in this path.
     engine.setCallback([&](float* buf, int n) {
@@ -455,7 +461,9 @@ int main(int argc, char** argv)
         eq.setSweepHz           (params.get(hexcaster::ParamId::EqSweepHz));
         eq.setQ                 (params.get(hexcaster::ParamId::EqQ));
         masterVolume.setGainDb  (params.get(hexcaster::ParamId::MasterVolume_dB));
+        inputMeter.measure(buf, n);
         pipeline.process(buf, n);
+        outputMeter.measure(buf, n);
     });
 
     // -------------------------------------------------------------------------
@@ -513,6 +521,8 @@ int main(int argc, char** argv)
             d.eqGain               = params.get(hexcaster::ParamId::EqGain_dB);
             d.eqSweep              = params.get(hexcaster::ParamId::EqSweepHz);
             d.eqQ                  = params.get(hexcaster::ParamId::EqQ);
+            d.inputLevelDb         = inputMeter.getPeakDb();
+            d.outputLevelDb        = outputMeter.getPeakDb();
             return d;
         };
 

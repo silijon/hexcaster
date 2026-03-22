@@ -42,6 +42,12 @@ struct MeterData {
     float eqSweep            = 0.f; // Hz
     float eqQ                = 0.f; // dimensionless
 
+    // --- Signal levels (host-level peak metering, dB) ---
+    // Range: -60 dB (floor/silence) to 0 dB (full scale).
+    // Measured in the audio callback: input before pipeline, output after.
+    float inputLevelDb  = -60.f;
+    float outputLevelDb = -60.f;
+
     // Set once at startup, never changes during a session
     std::string modelName;
 };

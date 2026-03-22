@@ -38,7 +38,7 @@ namespace hexcaster::tui {
  *
  * Keyboard shortcuts (vim-style):
  *   q         -- quit
- *   } / {     -- next / previous screen (Shift+] / Shift+[)
+ *   ] / [     -- next / previous screen
  *   Tab       -- select next meter on current screen
  *   Shift+Tab -- select previous meter
  *   j / k     -- decrease / increase selected meter (small step: 2% of range)
@@ -94,6 +94,7 @@ private:
     // --- Rendering ---
     ftxui::Component buildRoot();
     ftxui::Element   renderHeader();
+    ftxui::Element   renderSignalPanel();   // fixed left panel: input + output meters
     ftxui::Element   renderCurrentScreen();
 
     // --- Input handling ---
