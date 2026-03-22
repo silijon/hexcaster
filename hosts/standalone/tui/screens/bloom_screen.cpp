@@ -13,8 +13,13 @@ std::vector<MeterDesc> buildBloomScreenMeters()
     constexpr float kGainMax =  24.f;
 
     return {
-        // Envelope: observation-only, [0,1]
-        MeterDesc::fromObservation("Envelope",
+        // Detector envelope: fast audio tracker (fixed ~0.1ms attack, ~10ms release)
+        MeterDesc::fromObservation("Det Env",
+            [](const MeterData& d) { return d.bloomDetectorEnv; },
+            ""),
+
+        // Gain envelope: what actually drives the bloom gains (user attack/release)
+        MeterDesc::fromObservation("Gain Env",
             [](const MeterData& d) { return d.bloomEnvelope; },
             ""),
 

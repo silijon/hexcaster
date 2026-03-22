@@ -88,22 +88,24 @@ void BloomController::preProcess(const float* buffer, int numSamples)
             detEnv = detectorReleaseCoeff_ * detEnv + (1.f - detectorReleaseCoeff_) * absSample;
 
         // Stage 2: gain envelope (user attack/release shape the gain response).
-        // Tracks the detector output at the user-specified rates.
-        // This is what drives the gain formulas -- attack/release here control
-        // how quickly the pre/post gains ramp in response to note onsets/endings.
+        // Attack: ramp toward the detector value at the user attack rate.
+        // Release: decay toward zero at the user release rate -- completely
+        //   independent of the detector's waveform. This gives a clean
+        //   exponential decay contour rather than tracking the audio envelope.
         if (detEnv > gainEnv)
             gainEnv = gainAttackCoeff_  * gainEnv + (1.f - gainAttackCoeff_)  * detEnv;
         else
-            gainEnv = gainReleaseCoeff_ * gainEnv + (1.f - gainReleaseCoeff_) * detEnv;
+            gainEnv = gainReleaseCoeff_ * gainEnv;
     }
 
     detectorEnv_ = detEnv;
     gainEnv_     = gainEnv;
 
-    // Publish gain envelope for TUI observation (relaxed -- no ordering required).
-    // We expose gainEnv (not detEnv) since that's what drives the gain and is
-    // musically meaningful to display.
-    observedEnvelope_.store(std::clamp(gainEnv, 0.f, 1.f), std::memory_order_relaxed);
+    // Publish both envelopes for TUI observation (relaxed -- no ordering required).
+    // detEnv: fast audio tracker -- shows what the signal is doing.
+    // gainEnv: gain-driving envelope -- shows what bloom is actually doing.
+    observedDetectorEnv_.store(std::clamp(detEnv,  0.f, 1.f), std::memory_order_relaxed);
+    observedEnvelope_.store   (std::clamp(gainEnv, 0.f, 1.f), std::memory_order_relaxed);
 
     // Clamp for the gain formulas (safety net -- gainEnv should already be [0,1]).
     const float clampedEnv = std::clamp(gainEnv, 0.f, 1.f);
@@ -132,6 +134,11 @@ void BloomController::betweenStages(int /*stageIndex*/, float* /*buffer*/,
 float BloomController::getEnvelope() const
 {
     return observedEnvelope_.load(std::memory_order_relaxed);
+}
+
+float BloomController::getDetectorEnvelope() const
+{
+    return observedDetectorEnv_.load(std::memory_order_relaxed);
 }
 
 void BloomController::setBasePreDb(float db)

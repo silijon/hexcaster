@@ -92,12 +92,23 @@ public:
     void setSensitivity(float db);  // detection signal gain [0, 40] dB
 
     /**
-     * Read the current envelope follower value [0.0, 1.0].
+     * Read the current gain envelope value [0.0, 1.0].
+     * This is what drives the bloom pre/post gains. Its shape is governed
+     * by BloomAttackMs and BloomReleaseMs.
      * Safe to call from any thread (relaxed atomic load).
      * Updated once per audio block at the end of preProcess().
      * Intended for TUI metering only -- do not use in the audio path.
      */
     float getEnvelope() const;
+
+    /**
+     * Read the current fast detector envelope value [0.0, 1.0].
+     * This tracks the raw audio amplitude with fixed short time constants.
+     * Useful for TUI visualization to compare against the gain envelope.
+     * Safe to call from any thread (relaxed atomic load).
+     * Updated once per audio block.
+     */
+    float getDetectorEnvelope() const;
 
 private:
     GainStage& preGain_;
@@ -112,9 +123,10 @@ private:
     std::atomic<float> releaseMs_    { 100.f };
     std::atomic<float> sensitivity_  { 20.f  }; // dB
 
-    // --- Observation atomic (written by audio thread, read by TUI thread) ---
+    // --- Observation atomics (written by audio thread, read by TUI thread) ---
     // Updated once per block at the end of preProcess(). Relaxed ordering.
-    std::atomic<float> observedEnvelope_{ 0.f };
+    std::atomic<float> observedEnvelope_    { 0.f };  // gain envelope (drives bloom gains)
+    std::atomic<float> observedDetectorEnv_ { 0.f };  // fast detector (tracks audio)
 
     // --- Audio thread state ---
     float sampleRate_ = 48000.f;

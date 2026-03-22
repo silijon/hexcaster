@@ -30,7 +30,8 @@ struct MeterData {
     float inputGain          = 0.f; // dB
     float masterVolume       = 0.f; // dB
 
-    float bloomEnvelope        = 0.f;   // [0, 1] (observation atomic)
+    float bloomDetectorEnv     = 0.f;   // [0, 1] fast audio detector (observation atomic)
+    float bloomEnvelope        = 0.f;   // [0, 1] gain envelope -- drives pre/post gains
     float bloomBasePre         = 0.f;   // dB (base offset param)
     float bloomBasePost        = 0.f;   // dB (base offset param)
     float bloomPreGainApplied  = 0.f;   // dB -- actual gain set on bloomPreGain stage this block
