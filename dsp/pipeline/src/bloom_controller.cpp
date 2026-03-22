@@ -78,8 +78,10 @@ void BloomController::preProcess(const float* buffer, int numSamples)
             // Attack: snap toward peak (fast EMA)
             env = attackCoeff_ * env + (1.f - attackCoeff_) * absSample;
         } else {
-            // Release: decay toward zero (slow EMA)
-            env = releaseCoeff_ * env;
+            // Release: decay toward current signal level (not toward zero).
+            // This tracks musical dynamics -- the envelope follows the signal
+            // downward at the release rate rather than free-falling to silence.
+            env = releaseCoeff_ * env + (1.f - releaseCoeff_) * absSample;
         }
     }
 
