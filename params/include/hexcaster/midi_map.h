@@ -49,6 +49,14 @@ public:
      */
     bool dispatch(uint8_t ccNumber, uint8_t value, ParamRegistry& registry);
 
+    /**
+     * Returns true if the given parameter is mapped to any MIDI CC.
+     * Intended for TUI use to mark meters as read-only when MIDI-controlled.
+     * Safe to call from any thread (reads non-atomic array, intended for
+     * control/UI thread use only -- not called from the audio thread).
+     */
+    bool isMapped(ParamId id) const;
+
 private:
     // Store ParamId as uint32_t; kUnmapped sentinel stored as 0xFFFFFFFF
     uint32_t mappings_[kNumCCs];

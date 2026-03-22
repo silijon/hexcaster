@@ -87,6 +87,10 @@ void BloomController::preProcess(const float* buffer, int numSamples)
 
     envelope_ = env;
 
+    // Publish envelope for TUI observation (relaxed -- no ordering required,
+    // just cross-thread visibility at 30 Hz polling rate).
+    observedEnvelope_.store(std::clamp(env, 0.f, 1.f), std::memory_order_relaxed);
+
     // Clamp envelope to [0, 1] for the gain formulas.
     // In practice the peak follower output tracks the signal amplitude,
     // which for a normalised guitar signal is already in this range.
@@ -113,6 +117,11 @@ void BloomController::betweenStages(int /*stageIndex*/, float* /*buffer*/,
 // ---------------------------------------------------------------------------
 // Parameter setters
 // ---------------------------------------------------------------------------
+
+float BloomController::getEnvelope() const
+{
+    return observedEnvelope_.load(std::memory_order_relaxed);
+}
 
 void BloomController::setBasePreDb(float db)
 {

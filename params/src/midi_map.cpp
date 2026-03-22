@@ -44,4 +44,13 @@ bool MidiMap::dispatch(uint8_t ccNumber, uint8_t value, ParamRegistry& registry)
     return true;
 }
 
+bool MidiMap::isMapped(ParamId id) const
+{
+    const uint32_t target = static_cast<uint32_t>(id);
+    for (int i = 0; i < kNumCCs; ++i) {
+        if (mappings_[i] == target) return true;
+    }
+    return false;
+}
+
 } // namespace hexcaster

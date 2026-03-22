@@ -77,6 +77,14 @@ public:
     void setReleaseMs(float ms);
     void setSensitivity(float db);  // detection signal gain [0, 40] dB
 
+    /**
+     * Read the current envelope follower value [0.0, 1.0].
+     * Safe to call from any thread (relaxed atomic load).
+     * Updated once per audio block at the end of preProcess().
+     * Intended for TUI metering only -- do not use in the audio path.
+     */
+    float getEnvelope() const;
+
 private:
     GainStage& preGain_;
     GainStage& postGain_;
@@ -89,6 +97,10 @@ private:
     std::atomic<float> attackMs_     { 5.f   };
     std::atomic<float> releaseMs_    { 100.f };
     std::atomic<float> sensitivity_  { 20.f  }; // dB
+
+    // --- Observation atomic (written by audio thread, read by TUI thread) ---
+    // Updated once per block at the end of preProcess(). Relaxed ordering.
+    std::atomic<float> observedEnvelope_{ 0.f };
 
     // --- Audio thread state ---
     float sampleRate_ = 48000.f;

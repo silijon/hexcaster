@@ -25,13 +25,15 @@ add_compile_options(-ffast-math)
 # Required for static libs linked into shared MODULE (LV2 plugin)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# External dependencies
-include(cmake/dependencies.cmake)
-
-# Options
+# Options -- declared before dependencies.cmake so the dependency fetch
+# can condition on them (e.g. FTXUI is only fetched when TUI is ON).
 option(HEXCASTER_BUILD_LV2        "Build LV2 plugin"          ON)
 option(HEXCASTER_BUILD_STANDALONE "Build standalone runtime"   ON)
 option(HEXCASTER_BUILD_TESTS      "Build tests"                ON)
+option(HEXCASTER_BUILD_TUI        "Build TUI for standalone"   ON)
+
+# External dependencies
+include(cmake/dependencies.cmake)
 
 # Subdirectories
 add_subdirectory(params)

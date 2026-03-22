@@ -1,6 +1,27 @@
 include(FetchContent)
 
 # ---------------------------------------------------------------------------
+# FTXUI
+# C++ functional terminal UI library. Zero external dependencies, MIT license.
+# Used by the optional standalone TUI mode (--tui flag).
+# Only fetched when HEXCASTER_BUILD_TUI is ON.
+# ---------------------------------------------------------------------------
+
+if(HEXCASTER_BUILD_TUI)
+  FetchContent_Declare(
+    ftxui
+    GIT_REPOSITORY https://github.com/ArthurSonzogni/FTXUI.git
+    GIT_TAG        v6.1.9
+    GIT_SHALLOW    TRUE
+  )
+  # Disable FTXUI's own examples and tests to keep the build lean
+  set(FTXUI_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+  set(FTXUI_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
+  set(FTXUI_BUILD_DOCS     OFF CACHE BOOL "" FORCE)
+  FetchContent_MakeAvailable(ftxui)
+endif()
+
+# ---------------------------------------------------------------------------
 # NeuralAudio
 # NAM-compatible neural amp model inference engine.
 # Pinned to a specific commit on the release branch for reproducibility.

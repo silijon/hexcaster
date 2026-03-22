@@ -12,6 +12,10 @@
 #include "hexcaster/midi_map.h"
 #include "hexcaster/param_id.h"
 
+#ifdef HEXCASTER_TUI_ENABLED
+#include "tui/tui.h"
+#endif
+
 #include <atomic>
 #include <csignal>
 #include <cstdio>
@@ -62,6 +66,7 @@ struct Args {
     bool         listDevices    = false;
     bool         listMidi       = false;
     bool         help           = false;
+    bool         tui            = false;
     std::vector<MidiCcMapping> midiMappings;
 };
 
@@ -89,6 +94,7 @@ static void printUsage(const char* prog)
         "  --midi-cc <cc>:<ParamName>  Map a MIDI CC to a parameter  (repeatable)\n"
         "  --list-devices              Print ALSA PCM devices and exit\n"
         "  --list-midi                 Print ALSA raw MIDI devices and exit\n"
+        "  --tui                       Start in terminal UI mode\n"
         "  --help                      Show this help and exit\n"
         "\n"
         "Parameter names for --midi-cc:\n"
@@ -155,6 +161,10 @@ static bool parseArgs(int argc, char** argv, Args& args)
         if (std::strcmp(key, "--list-midi") == 0) {
             args.listMidi = true;
             return true;
+        }
+        if (std::strcmp(key, "--tui") == 0) {
+            args.tui = true;
+            continue;
         }
 
         if (std::strcmp(key, "--model") == 0) {
@@ -464,31 +474,90 @@ int main(int argc, char** argv)
     }
 
     // -------------------------------------------------------------------------
-    // Signal handler + run
+    // Signal handler
     // -------------------------------------------------------------------------
 
     std::signal(SIGINT,  handleSignal);
     std::signal(SIGTERM, handleSignal);
 
-    std::fprintf(stdout,
-        "Running -- press Ctrl+C to stop.\n"
-        "Gate: %.1f dB  |  Input gain: %.1f dB  |  Input ch: %d  |  Output: L+R%s\n",
-        args.gateThresholdDb, args.gainDb, args.inputChannel,
-        midiInput.isOpen() ? "  |  MIDI active" : "");
+    // -------------------------------------------------------------------------
+    // TUI mode vs headless mode
+    // -------------------------------------------------------------------------
 
-    std::thread watcher([&]() {
-        while (!gQuit.load(std::memory_order_relaxed))
-            usleep(50000);
+#ifdef HEXCASTER_TUI_ENABLED
+    if (args.tui) {
+        // TUI mode: audio engine runs on a background thread,
+        // TUI (FTXUI) runs on the main thread.
+
+        // Snapshot producer: called ~30x/s on the TUI refresh thread.
+        // All reads are atomic -- no locks, real-time safe.
+        auto snapshotFn = [&]() -> hexcaster::tui::MeterData {
+            hexcaster::tui::MeterData d;
+            d.modelName            = nam.modelPath();
+            d.gateGain             = noiseGate.getGateGain();
+            d.gateState            = static_cast<int>(noiseGate.getState());
+            d.noiseGateThreshold   = params.get(hexcaster::ParamId::NoiseGateThreshold_dB);
+            d.noiseGateAttack      = params.get(hexcaster::ParamId::NoiseGateAttackMs);
+            d.noiseGateRelease     = params.get(hexcaster::ParamId::NoiseGateReleaseMs);
+            d.noiseGateHold        = params.get(hexcaster::ParamId::NoiseGateHoldMs);
+            d.inputGain            = params.get(hexcaster::ParamId::InputGain_dB);
+            d.masterVolume         = params.get(hexcaster::ParamId::MasterVolume_dB);
+            d.bloomEnvelope        = bloom.getEnvelope();
+            d.bloomBasePre         = params.get(hexcaster::ParamId::BloomBasePre_dB);
+            d.bloomBasePost        = params.get(hexcaster::ParamId::BloomBasePost_dB);
+            d.bloomDepth           = params.get(hexcaster::ParamId::BloomDepth);
+            d.bloomCompensation    = params.get(hexcaster::ParamId::BloomCompensation);
+            d.bloomSensitivity     = params.get(hexcaster::ParamId::BloomSensitivity_dB);
+            d.envAttack            = params.get(hexcaster::ParamId::EnvAttackMs);
+            d.envRelease           = params.get(hexcaster::ParamId::EnvReleaseMs);
+            d.eqGain               = params.get(hexcaster::ParamId::EqGain_dB);
+            d.eqSweep              = params.get(hexcaster::ParamId::EqSweepHz);
+            d.eqQ                  = params.get(hexcaster::ParamId::EqQ);
+            return d;
+        };
+
+        // Run the audio engine on a background thread.
+        // The thread is given SCHED_FIFO priority inside engine.run().
+        std::thread audioThread([&]() {
+            engine.run();
+        });
+
+        // Run TUI on the main thread (FTXUI owns the terminal here).
+        {
+            hexcaster::tui::Tui tui(snapshotFn, params, midiMap, gQuit);
+            tui.run();
+        }
+
+        // TUI has exited -- stop audio and clean up
         engine.stop();
-    });
+        audioThread.join();
 
-    engine.run();
+    } else
+#endif // HEXCASTER_TUI_ENABLED
+    {
+        // Headless mode: audio engine runs on the main thread (unchanged behavior).
+        std::fprintf(stdout,
+            "Running -- press Ctrl+C to stop.\n"
+            "Gate: %.1f dB  |  Input gain: %.1f dB  |  Input ch: %d  |  Output: L+R%s\n",
+            args.gateThresholdDb, args.gainDb, args.inputChannel,
+            midiInput.isOpen() ? "  |  MIDI active" : "");
 
-    // Shutdown sequence: stop MIDI before audio is fully torn down
+        std::thread watcher([&]() {
+            while (!gQuit.load(std::memory_order_relaxed))
+                usleep(50000);
+            engine.stop();
+        });
+
+        engine.run();
+        watcher.join();
+    }
+
+    // -------------------------------------------------------------------------
+    // Shared shutdown sequence (both modes)
+    // -------------------------------------------------------------------------
+
     midiInput.stop();
     midiInput.close();
-
-    watcher.join();
     engine.close();
 
     std::fprintf(stdout, "Bye.\n");

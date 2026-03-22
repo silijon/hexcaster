@@ -114,6 +114,10 @@ void NoiseGate::process(float* buffer, int numSamples)
 
         buffer[i] = input * gateGain_;
     }
+
+    // Publish observation values for TUI polling (relaxed -- just visibility).
+    observedGateGain_.store(gateGain_, std::memory_order_relaxed);
+    observedState_.store(static_cast<uint8_t>(state_), std::memory_order_relaxed);
 }
 
 // ---------------------------------------------------------------------------
@@ -144,6 +148,16 @@ float NoiseGate::getThresholdDb()  const { return thresholdDb_.load(std::memory_
 float NoiseGate::getAttackMs()     const { return attackMs_.load(std::memory_order_relaxed); }
 float NoiseGate::getReleaseMs()    const { return releaseMs_.load(std::memory_order_relaxed); }
 float NoiseGate::getHoldMs()       const { return holdMs_.load(std::memory_order_relaxed); }
+
+float NoiseGate::getGateGain() const
+{
+    return observedGateGain_.load(std::memory_order_relaxed);
+}
+
+NoiseGate::State NoiseGate::getState() const
+{
+    return static_cast<State>(observedState_.load(std::memory_order_relaxed));
+}
 
 // ---------------------------------------------------------------------------
 // Private helpers
