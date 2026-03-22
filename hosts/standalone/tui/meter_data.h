@@ -38,8 +38,8 @@ struct MeterData {
     float bloomDepth           = 0.f;   // dB
     float bloomCompensation  = 0.f; // ratio
     float bloomSensitivity   = 0.f; // dB
-    float envAttack          = 0.f; // ms
-    float envRelease         = 0.f; // ms
+    float bloomAttack        = 0.f; // ms
+    float bloomRelease       = 0.f; // ms
 
     float eqGain             = 0.f; // dB
     float eqSweep            = 0.f; // Hz

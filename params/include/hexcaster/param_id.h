@@ -21,10 +21,10 @@ enum class ParamId : uint32_t {
     // --- Bloom (dynamic gain) ---
     BloomBasePre_dB     = 0,  // Baseline pre-amp gain offset (dB)
     BloomBasePost_dB    = 1,  // Baseline post-amp gain offset (dB)
-    BloomDepth          = 2,  // Max input gain reduction at full envelope (dB)
+    BloomDepth_dB       = 2,  // Max input gain reduction at full envelope (dB)
     BloomCompensation   = 3,  // Output compensation ratio on input reduction [0, 2]
-    EnvAttackMs         = 4,  // Envelope follower attack time (ms)
-    EnvReleaseMs        = 5,  // Envelope follower release time (ms)
+    BloomAttackMs       = 4,  // Bloom gain envelope attack time (ms)
+    BloomReleaseMs      = 5,  // Bloom gain envelope release time (ms)
     BloomSensitivity_dB = 6,  // Detection signal gain before envelope follower (dB)
 
     // --- Input Gain ---
@@ -56,13 +56,13 @@ inline bool paramIdFromName(std::string_view name, ParamId& out)
 {
     struct Entry { std::string_view name; ParamId id; };
     static constexpr Entry kTable[] = {
-        { "BloomBasePre_dB",  ParamId::BloomBasePre_dB  },
-        { "BloomBasePost_dB", ParamId::BloomBasePost_dB },
-        { "BloomDepth",           ParamId::BloomDepth           },
-        { "BloomCompensation",    ParamId::BloomCompensation    },
-        { "EnvAttackMs",          ParamId::EnvAttackMs          },
-        { "EnvReleaseMs",         ParamId::EnvReleaseMs         },
-        { "BloomSensitivity_dB",  ParamId::BloomSensitivity_dB  },
+        { "BloomBasePre_dB",    ParamId::BloomBasePre_dB    },
+        { "BloomBasePost_dB",   ParamId::BloomBasePost_dB   },
+        { "BloomDepth_dB",      ParamId::BloomDepth_dB      },
+        { "BloomCompensation",  ParamId::BloomCompensation  },
+        { "BloomAttackMs",      ParamId::BloomAttackMs      },
+        { "BloomReleaseMs",     ParamId::BloomReleaseMs     },
+        { "BloomSensitivity_dB",ParamId::BloomSensitivity_dB},
         { "InputGain_dB",     ParamId::InputGain_dB     },
         { "NoiseGateThreshold_dB",  ParamId::NoiseGateThreshold_dB  },
         { "NoiseGateAttackMs",      ParamId::NoiseGateAttackMs      },

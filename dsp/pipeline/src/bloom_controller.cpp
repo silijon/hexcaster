@@ -23,16 +23,22 @@ void BloomController::prepare(float sampleRate, int /*maxBlockSize*/)
 {
     sampleRate_ = sampleRate;
     computeHpfCoefficients();
-    cachedAttackMs_  = -1.f;  // force coefficient recompute on first block
+
+    // Compute fixed detector coefficients (not user-controlled)
+    detectorAttackCoeff_  = msToCoeff(kDetectorAttackMs,  sampleRate_);
+    detectorReleaseCoeff_ = msToCoeff(kDetectorReleaseMs, sampleRate_);
+
+    cachedAttackMs_  = -1.f;  // force gain envelope coefficient recompute on first block
     cachedReleaseMs_ = -1.f;
     reset();
 }
 
 void BloomController::reset()
 {
-    envelope_ = 0.f;
-    hpfX1_    = 0.f;
-    hpfY1_    = 0.f;
+    detectorEnv_ = 0.f;
+    gainEnv_     = 0.f;
+    hpfX1_       = 0.f;
+    hpfY1_       = 0.f;
 }
 
 // ---------------------------------------------------------------------------
@@ -58,44 +64,49 @@ void BloomController::preProcess(const float* buffer, int numSamples)
         updateCoefficients();
     }
 
-    // Run detector HPF + envelope follower per-sample across the block.
+    // Run detector HPF + two-stage envelope per-sample across the block.
     // The HPF is applied to the detection signal only -- the audio buffer
     // is const and is not modified.
-    float env = envelope_;
+    float detEnv  = detectorEnv_;
+    float gainEnv = gainEnv_;
 
     for (int i = 0; i < numSamples; ++i) {
-        // 1st-order high-pass filter (detector sidechain)
-        const float x = buffer[i];
+        // Stage 1a: detector HPF (sidechain only, not audio path)
+        const float x      = buffer[i];
         const float hpfOut = hpfB0_ * x + hpfB1_ * hpfX1_ - hpfA1_ * hpfY1_;
         hpfX1_ = x;
         hpfY1_ = hpfOut;
 
-        // Peak envelope follower -- sensitivity scales the detection signal
-        // only, not the audio path. This normalises the raw ADC amplitude
-        // to a useful [0, 1] working range for the gain formulas.
+        // Stage 1b: fast peak detector.
+        // Sensitivity scales the detection signal to normalise raw ADC amplitude.
+        // Uses fixed short attack/release so it responds near-instantaneously to
+        // note onsets -- the detector answers "is there signal?"
         const float absSample = (hpfOut < 0.f ? -hpfOut : hpfOut) * sensitivityLin;
-        if (absSample > env) {
-            // Attack: snap toward peak (fast EMA)
-            env = attackCoeff_ * env + (1.f - attackCoeff_) * absSample;
-        } else {
-            // Release: decay toward current signal level (not toward zero).
-            // This tracks musical dynamics -- the envelope follows the signal
-            // downward at the release rate rather than free-falling to silence.
-            env = releaseCoeff_ * env + (1.f - releaseCoeff_) * absSample;
-        }
+        if (absSample > detEnv)
+            detEnv = detectorAttackCoeff_  * detEnv + (1.f - detectorAttackCoeff_)  * absSample;
+        else
+            detEnv = detectorReleaseCoeff_ * detEnv + (1.f - detectorReleaseCoeff_) * absSample;
+
+        // Stage 2: gain envelope (user attack/release shape the gain response).
+        // Tracks the detector output at the user-specified rates.
+        // This is what drives the gain formulas -- attack/release here control
+        // how quickly the pre/post gains ramp in response to note onsets/endings.
+        if (detEnv > gainEnv)
+            gainEnv = gainAttackCoeff_  * gainEnv + (1.f - gainAttackCoeff_)  * detEnv;
+        else
+            gainEnv = gainReleaseCoeff_ * gainEnv + (1.f - gainReleaseCoeff_) * detEnv;
     }
 
-    envelope_ = env;
+    detectorEnv_ = detEnv;
+    gainEnv_     = gainEnv;
 
-    // Publish envelope for TUI observation (relaxed -- no ordering required,
-    // just cross-thread visibility at 30 Hz polling rate).
-    observedEnvelope_.store(std::clamp(env, 0.f, 1.f), std::memory_order_relaxed);
+    // Publish gain envelope for TUI observation (relaxed -- no ordering required).
+    // We expose gainEnv (not detEnv) since that's what drives the gain and is
+    // musically meaningful to display.
+    observedEnvelope_.store(std::clamp(gainEnv, 0.f, 1.f), std::memory_order_relaxed);
 
-    // Clamp envelope to [0, 1] for the gain formulas.
-    // In practice the peak follower output tracks the signal amplitude,
-    // which for a normalised guitar signal is already in this range.
-    // The clamp is a safety net.
-    const float clampedEnv = std::clamp(env, 0.f, 1.f);
+    // Clamp for the gain formulas (safety net -- gainEnv should already be [0,1]).
+    const float clampedEnv = std::clamp(gainEnv, 0.f, 1.f);
 
     // Compute gain targets from the envelope
     const float reductionDb = depth * clampedEnv;
@@ -170,8 +181,10 @@ float BloomController::msToCoeff(float ms, float sampleRate)
 
 void BloomController::updateCoefficients()
 {
-    attackCoeff_  = msToCoeff(cachedAttackMs_,  sampleRate_);
-    releaseCoeff_ = msToCoeff(cachedReleaseMs_, sampleRate_);
+    // Update gain envelope coefficients from user attack/release params.
+    // Detector coefficients are fixed and set once in prepare().
+    gainAttackCoeff_  = msToCoeff(cachedAttackMs_,  sampleRate_);
+    gainReleaseCoeff_ = msToCoeff(cachedReleaseMs_, sampleRate_);
 }
 
 // Detector HPF: 1st-order high-pass filter.

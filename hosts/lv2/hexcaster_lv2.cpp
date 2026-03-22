@@ -223,10 +223,10 @@ static void run(LV2_Handle instance, uint32_t sampleCount)
 
     self->bloom.setBasePreDb   (self->params.get(hexcaster::ParamId::BloomBasePre_dB));
     self->bloom.setBasePostDb  (self->params.get(hexcaster::ParamId::BloomBasePost_dB));
-    self->bloom.setDepth       (self->params.get(hexcaster::ParamId::BloomDepth));
+    self->bloom.setDepth       (self->params.get(hexcaster::ParamId::BloomDepth_dB));
     self->bloom.setCompensation(self->params.get(hexcaster::ParamId::BloomCompensation));
-    self->bloom.setAttackMs    (self->params.get(hexcaster::ParamId::EnvAttackMs));
-    self->bloom.setReleaseMs   (self->params.get(hexcaster::ParamId::EnvReleaseMs));
+    self->bloom.setAttackMs    (self->params.get(hexcaster::ParamId::BloomAttackMs));
+    self->bloom.setReleaseMs   (self->params.get(hexcaster::ParamId::BloomReleaseMs));
     self->bloom.setSensitivity (self->params.get(hexcaster::ParamId::BloomSensitivity_dB));
     self->eq.setGainDb         (self->params.get(hexcaster::ParamId::EqGain_dB));
     self->eq.setSweepHz        (self->params.get(hexcaster::ParamId::EqSweepHz));

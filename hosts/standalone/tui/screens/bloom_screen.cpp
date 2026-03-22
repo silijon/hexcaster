@@ -29,11 +29,11 @@ std::vector<MeterDesc> buildBloomScreenMeters()
             kGainMin, kGainMax, " dB"),
 
         // Tuning parameters (adjustable unless MIDI-mapped)
-        MeterDesc::fromParam("Depth",     ParamId::BloomDepth,          " dB"),
+        MeterDesc::fromParam("Depth",     ParamId::BloomDepth_dB,        " dB"),
         MeterDesc::fromParam("Comp",      ParamId::BloomCompensation,   ""),
         MeterDesc::fromParam("Sensitiv.", ParamId::BloomSensitivity_dB, " dB"),
-        MeterDesc::fromParam("Env Atk",  ParamId::EnvAttackMs,          " ms"),
-        MeterDesc::fromParam("Env Rel",  ParamId::EnvReleaseMs,          " ms"),
+        MeterDesc::fromParam("Atk",      ParamId::BloomAttackMs,        " ms"),
+        MeterDesc::fromParam("Rel",      ParamId::BloomReleaseMs,       " ms"),
     };
 }
 

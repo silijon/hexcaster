@@ -16,17 +16,17 @@ namespace hexcaster {
  *
  * Gain formulas (evaluated once per block):
  *
- *   reductionDb = BloomDepth * envelope
+ *   reductionDb = BloomDepth_dB * gainEnvelope
  *   preGainDb   = BloomBasePre_dB  - reductionDb
  *   postGainDb  = BloomBasePost_dB + BloomCompensation * reductionDb
  *
- * When envelope = 0 (silence): pre-gain = BasePre, post-gain = BasePost.
- * When envelope = 1 (full):    pre-gain = BasePre - Depth,
- *                               post-gain = BasePost + Compensation * Depth.
+ * When gainEnvelope = 0 (silence): pre-gain = BasePre, post-gain = BasePost.
+ * When gainEnvelope = 1 (full):    pre-gain = BasePre - Depth,
+ *                                  post-gain = BasePost + Compensation * Depth.
  *
  * Architecture:
  *   - Registered as a PipelineController via pipeline.addController().
- *   - preProcess(): runs detector HPF + envelope follower on the input
+ *   - preProcess(): runs detector HPF + two-stage envelope on the input
  *     signal (read-only), then sets the pre-gain and post-gain targets
  *     on the GainStage references. The GainStages then apply smoothed
  *     gain per-sample when their process() is called in the stage chain.
@@ -34,11 +34,25 @@ namespace hexcaster {
  *   - Does NOT own the GainStage objects -- they live in the pipeline
  *     stage list. The host creates them and passes references.
  *
- * Envelope follower:
- *   - Per-sample peak tracking with configurable attack/release.
- *   - Detector HPF (1st-order high-pass at 100 Hz, fixed) applied to the
- *     detection signal only, not the audio path. Prevents low-frequency
- *     thumps from dominating the envelope.
+ * Two-stage envelope:
+ *   Stage 1 -- Detector (fast, fixed time constants):
+ *     Instantaneous peak tracking with fixed short attack (~0.1 ms) and
+ *     release (~10 ms). Answers: "is there signal, and how strong is it?"
+ *     Not controlled by user parameters.
+ *
+ *   Stage 2 -- Gain envelope (user-controlled attack/release):
+ *     EMA that tracks the detector output. BloomAttackMs and BloomReleaseMs
+ *     control how fast the gain ramps in response to the detector signal.
+ *     This is the value that drives the gain formulas and is shown in the TUI.
+ *
+ *   Separation rationale: the detector fires immediately when a note is
+ *   struck; the gain envelope then shapes how quickly the pre/post gains
+ *   respond. Attack/release therefore control the musical gain behaviour,
+ *   not how quickly the detector tracks the audio waveform.
+ *
+ *   Detector HPF (1st-order high-pass at 100 Hz, fixed) applied to the
+ *   detection signal only, not the audio path. Prevents low-frequency
+ *   thumps from dominating the detector.
  *   - Output normalised to [0.0, 1.0].
  *
  * Real-time safety:
@@ -104,13 +118,20 @@ private:
 
     // --- Audio thread state ---
     float sampleRate_ = 48000.f;
-    float envelope_   = 0.f;     // current peak envelope [0, 1]
 
-    // Envelope follower EMA coefficients (recomputed when params change)
-    float attackCoeff_  = 0.f;
-    float releaseCoeff_ = 0.f;
-    float cachedAttackMs_  = -1.f;
-    float cachedReleaseMs_ = -1.f;
+    // Stage 1: fast peak detector (fixed time constants, not user-controlled)
+    static constexpr float kDetectorAttackMs  = 0.1f;   // near-instantaneous peak capture
+    static constexpr float kDetectorReleaseMs = 10.f;   // fast release to track note endings
+    float detectorEnv_           = 0.f;
+    float detectorAttackCoeff_   = 0.f;   // computed once in prepare()
+    float detectorReleaseCoeff_  = 0.f;   // computed once in prepare()
+
+    // Stage 2: gain envelope (user BloomAttackMs / BloomReleaseMs control this)
+    float gainEnv_           = 0.f;
+    float gainAttackCoeff_   = 0.f;   // recomputed when params change
+    float gainReleaseCoeff_  = 0.f;   // recomputed when params change
+    float cachedAttackMs_    = -1.f;
+    float cachedReleaseMs_   = -1.f;
 
     // Detector HPF state (1st-order high-pass, 100 Hz fixed)
     static constexpr float kDetectorHpfHz = 100.f;
