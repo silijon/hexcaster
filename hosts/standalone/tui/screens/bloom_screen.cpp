@@ -23,13 +23,18 @@ std::vector<MeterDesc> buildBloomScreenMeters()
             [](const MeterData& d) { return d.bloomEnvelope; },
             ""),
 
-        // Harmonic activity: EMA of |delta(smoothedDet)|.
+        // Harmonic activity: EMA of squared |delta(smoothedDet)|, scaled.
         // High = complex harmonic content (chords). Low = single note / silence.
-        // Visible in all modes; used by Adaptive mode for release decisions.
-        // Range [0, 0.0005] covers the useful display range for typical signals.
-        MeterDesc::fromObservationRanged("Activity",
+        // Visible in all modes. Squaring exaggerates the chord/note difference.
+        // Values are already in [0, 1] range after kActivityScale is applied.
+        MeterDesc::fromObservation("Activity",
             [](const MeterData& d) { return d.harmonicActivity; },
-            0.f, 0.0005f, ""),
+            ""),
+
+        // Activity threshold (Adaptive mode release gate).
+        // Place this between single-note and chord activity levels.
+        // Displayed adjacent to Activity so you can tune one against the other.
+        MeterDesc::fromParam("Thresh", ParamId::BloomActivityThreshold, ""),
 
         // Applied pre/post gain: what the BloomController actually set last block.
         // Falls as envelope rises (pre) and rises (post) -- shows dynamic action.

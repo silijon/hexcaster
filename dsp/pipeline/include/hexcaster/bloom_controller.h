@@ -102,7 +102,8 @@ public:
     void setCompensation(float ratio);
     void setAttackMs(float ms);
     void setReleaseMs(float ms);
-    void setSensitivity(float db);  // detection signal gain [0, 40] dB
+    void setSensitivity(float db);         // detection signal gain [0, 40] dB
+    void setActivityThreshold(float t);   // Adaptive release gate [0, 1]
 
     /** Set the bloom gain envelope mode. Thread-safe. */
     void setMode(BloomMode m);
@@ -149,8 +150,9 @@ private:
     std::atomic<float> compensation_ { 0.5f  };
     std::atomic<float> attackMs_     { 5.f   };
     std::atomic<float> releaseMs_    { 100.f };
-    std::atomic<float> sensitivity_  { 20.f  }; // dB
-    std::atomic<uint8_t> mode_       { static_cast<uint8_t>(BloomMode::Shaped) };
+    std::atomic<float>   sensitivity_         { 20.f  }; // dB
+    std::atomic<float>   activityThreshold_  { 0.01f }; // Adaptive mode release gate [0,1]
+    std::atomic<uint8_t> mode_               { static_cast<uint8_t>(BloomMode::Shaped) };
 
     // --- Observation atomics (written by audio thread, read by TUI thread) ---
     // Updated once per block at the end of preProcess(). Relaxed ordering.
@@ -185,8 +187,11 @@ private:
     //   harmAct > threshold → track audio (chord-like, gentle release)
     //   harmAct <= threshold → freefall at user release rate (single note)
     // -----------------------------------------------------------------------
-    static constexpr float kActivityFollowerMs = 50.f;     // EMA time constant
-    static constexpr float kActivityThreshold  = 0.000005f; // below = simple content
+    static constexpr float kActivityFollowerMs = 50.f;    // EMA time constant
+    // Squared delta scaling: brings (absDelta^2) into a [0,1] display range.
+    // absDelta for chords is ~1e-5, squared ~1e-10, * 1e9 => ~0.1 on meter.
+    // absDelta for single notes is ~1e-6, squared ~1e-12, * 1e9 => ~0.001.
+    static constexpr float kActivityScale      = 1e9f;    // scale squared delta
     float harmonicActivity_      = 0.f;
     float prevSmoothedDet_       = 0.f;   // previous sample's smoothedDet (for delta)
     float activityCoeff_         = 0.f;   // computed once in prepare()

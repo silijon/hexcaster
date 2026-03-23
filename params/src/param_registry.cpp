@@ -23,7 +23,8 @@ ParamRegistry::kParamInfo = []() {
     info[idx(ParamId::BloomCompensation)] = { 0.5f,  0.f,   2.f };
     info[idx(ParamId::BloomAttackMs)]     = {  5.f,  0.1f, 500.f };
     info[idx(ParamId::BloomReleaseMs)]    = {100.f,  1.f, 5000.f };
-    info[idx(ParamId::BloomSensitivity_dB)]  = { 20.f,   0.f,   40.f };
+    info[idx(ParamId::BloomSensitivity_dB)]     = { 20.f,  0.f,  40.f };
+    info[idx(ParamId::BloomActivityThreshold)]  = {0.01f, 0.0f,  1.0f };
 
     // Input Gain
     info[idx(ParamId::InputGain_dB)]     = {   0.f, -60.f,   24.f };

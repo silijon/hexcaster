@@ -104,6 +104,7 @@ static void printUsage(const char* prog)
         "Parameter names for --midi-cc:\n"
         "  InputGain_dB         BloomBasePre_dB    BloomBasePost_dB\n"
         "  BloomDepth_dB  BloomCompensation  BloomSensitivity_dB  BloomAttackMs  BloomReleaseMs\n"
+        "  BloomActivityThreshold\n"
         "  NoiseGateThreshold_dB  NoiseGateAttackMs  NoiseGateReleaseMs  NoiseGateHoldMs\n"
         "  EqGain_dB  EqSweepHz  EqQ  MasterVolume_dB\n"
         "\n"
@@ -338,7 +339,8 @@ int main(int argc, char** argv)
             {"BloomCompensation",     hexcaster::ParamId::BloomCompensation},
             {"BloomAttackMs",         hexcaster::ParamId::BloomAttackMs},
             {"BloomReleaseMs",        hexcaster::ParamId::BloomReleaseMs},
-            {"BloomSensitivity_dB",   hexcaster::ParamId::BloomSensitivity_dB},
+            {"BloomSensitivity_dB",      hexcaster::ParamId::BloomSensitivity_dB},
+            {"BloomActivityThreshold",   hexcaster::ParamId::BloomActivityThreshold},
             {"NoiseGateThreshold_dB", hexcaster::ParamId::NoiseGateThreshold_dB},
             {"NoiseGateAttackMs",     hexcaster::ParamId::NoiseGateAttackMs},
             {"NoiseGateReleaseMs",    hexcaster::ParamId::NoiseGateReleaseMs},
@@ -469,9 +471,10 @@ int main(int argc, char** argv)
         bloom.setBasePostDb     (params.get(hexcaster::ParamId::BloomBasePost_dB));
         bloom.setDepth          (params.get(hexcaster::ParamId::BloomDepth_dB));
         bloom.setCompensation   (params.get(hexcaster::ParamId::BloomCompensation));
-        bloom.setAttackMs       (params.get(hexcaster::ParamId::BloomAttackMs));
-        bloom.setReleaseMs      (params.get(hexcaster::ParamId::BloomReleaseMs));
-        bloom.setSensitivity    (params.get(hexcaster::ParamId::BloomSensitivity_dB));
+        bloom.setAttackMs          (params.get(hexcaster::ParamId::BloomAttackMs));
+        bloom.setReleaseMs         (params.get(hexcaster::ParamId::BloomReleaseMs));
+        bloom.setSensitivity       (params.get(hexcaster::ParamId::BloomSensitivity_dB));
+        bloom.setActivityThreshold (params.get(hexcaster::ParamId::BloomActivityThreshold));
         eq.setGainDb            (params.get(hexcaster::ParamId::EqGain_dB));
         eq.setSweepHz           (params.get(hexcaster::ParamId::EqSweepHz));
         eq.setQ                 (params.get(hexcaster::ParamId::EqQ));

@@ -68,10 +68,11 @@ void BloomController::preProcess(const float* buffer, int numSamples)
     const float basePostDb   = basePostDb_.load(std::memory_order_relaxed);
     const float depth        = depth_.load(std::memory_order_relaxed);
     const float compensation = compensation_.load(std::memory_order_relaxed);
-    const float attackMs     = attackMs_.load(std::memory_order_relaxed);
-    const float releaseMs    = releaseMs_.load(std::memory_order_relaxed);
-    const float sensitivityLin = std::pow(10.f,
+    const float attackMs          = attackMs_.load(std::memory_order_relaxed);
+    const float releaseMs         = releaseMs_.load(std::memory_order_relaxed);
+    const float sensitivityLin    = std::pow(10.f,
         sensitivity_.load(std::memory_order_relaxed) / 20.f);
+    const float activityThreshold = activityThreshold_.load(std::memory_order_relaxed);
 
     // Recompute EMA coefficients if attack/release changed
     if (attackMs != cachedAttackMs_ || releaseMs != cachedReleaseMs_) {
@@ -132,7 +133,11 @@ void BloomController::preProcess(const float* buffer, int numSamples)
         // ---------------------------------------------------------------
         const float delta    = smoothedDet - prevSD;
         const float absDelta = (delta < 0.f) ? -delta : delta;
-        harmAct = activityCoeff_ * harmAct + (1.f - activityCoeff_) * absDelta;
+        // Square the delta before feeding the EMA to exaggerate the difference
+        // between chord beating (large deltas) and single-note decay (small deltas).
+        // Scale factor brings the resulting values into a [0, 1] display range.
+        const float sq = absDelta * absDelta * kActivityScale;
+        harmAct = activityCoeff_ * harmAct + (1.f - activityCoeff_) * sq;
         prevSD  = smoothedDet;
 
         // ---------------------------------------------------------------
@@ -180,7 +185,7 @@ void BloomController::preProcess(const float* buffer, int numSamples)
             if (smoothedDet > gainEnv) {
                 // Attack: track detector upward at user attack rate
                 gainEnv = gainAttackCoeff_ * gainEnv + (1.f - gainAttackCoeff_) * smoothedDet;
-            } else if (harmAct > kActivityThreshold) {
+            } else if (harmAct > activityThreshold) {
                 // Rich harmonic content (chord): track audio down gently
                 gainEnv = gainReleaseCoeff_ * gainEnv + (1.f - gainReleaseCoeff_) * smoothedDet;
             } else {
@@ -291,6 +296,11 @@ void BloomController::setReleaseMs(float ms)
 void BloomController::setSensitivity(float db)
 {
     sensitivity_.store(std::clamp(db, 0.f, 40.f), std::memory_order_relaxed);
+}
+
+void BloomController::setActivityThreshold(float t)
+{
+    activityThreshold_.store(std::clamp(t, 0.f, 1.f), std::memory_order_relaxed);
 }
 
 void BloomController::setMode(BloomMode m)
