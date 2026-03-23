@@ -41,7 +41,8 @@ struct MeterData {
     float bloomSensitivity   = 0.f; // dB
     float bloomAttack        = 0.f; // ms
     float bloomRelease       = 0.f; // ms
-    int   bloomMode          = 0;   // 0 = Shaped, 1 = Tracking
+    float harmonicActivity   = 0.f; // EMA of |delta(smoothedDet)|
+    int   bloomMode          = 0;   // 0 = Shaped, 1 = Tracking, 2 = Adaptive
 
     float eqGain             = 0.f; // dB
     float eqSweep            = 0.f; // Hz

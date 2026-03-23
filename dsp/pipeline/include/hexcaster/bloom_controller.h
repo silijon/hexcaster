@@ -70,7 +70,7 @@ namespace hexcaster {
  *             attack/release as a two-pole smoother. Gain tracks the audio
  *             dynamics rather than imposing an independent decay shape.
  */
-enum class BloomMode : uint8_t { Shaped = 0, Tracking = 1 };
+enum class BloomMode : uint8_t { Shaped = 0, Tracking = 1, Adaptive = 2 };
 
 class BloomController : public PipelineController {
 public:
@@ -129,6 +129,15 @@ public:
      */
     float getDetectorEnvelope() const;
 
+    /**
+     * Read the current harmonic activity level.
+     * EMA of |delta(smoothedDet)|. High = complex harmonic content (chords).
+     * Low = simple content or silence (single notes, quiet).
+     * Computed in all modes; used by Adaptive mode for release decisions.
+     * Safe to call from any thread (relaxed atomic load).
+     */
+    float getHarmonicActivity() const;
+
 private:
     GainStage& preGain_;
     GainStage& postGain_;
@@ -145,8 +154,9 @@ private:
 
     // --- Observation atomics (written by audio thread, read by TUI thread) ---
     // Updated once per block at the end of preProcess(). Relaxed ordering.
-    std::atomic<float> observedEnvelope_    { 0.f };  // gain envelope (drives bloom gains)
-    std::atomic<float> observedDetectorEnv_ { 0.f };  // fast detector (tracks audio)
+    std::atomic<float> observedEnvelope_         { 0.f };  // gain envelope (drives bloom gains)
+    std::atomic<float> observedDetectorEnv_      { 0.f };  // fast detector (tracks audio)
+    std::atomic<float> observedHarmonicActivity_ { 0.f };  // harmonic activity metric
 
     // --- Audio thread state ---
     float sampleRate_ = 48000.f;
@@ -163,6 +173,23 @@ private:
     float detectorAttackCoeff_   = 0.f;   // computed once in prepare()
     float detectorReleaseCoeff_  = 0.f;   // computed once in prepare()
     float detectorSmoothCoeff_   = 0.f;   // computed once in prepare()
+
+    // -----------------------------------------------------------------------
+    // Harmonic activity metric (computed in all modes, used by Adaptive)
+    //
+    // Running EMA of |delta(smoothedDet)|. Measures how much the detector
+    // signal is fluctuating. High = complex harmonic content (chord beating).
+    // Low = clean single-note decay or silence.
+    //
+    // In Adaptive mode, this determines release behaviour:
+    //   harmAct > threshold → track audio (chord-like, gentle release)
+    //   harmAct <= threshold → freefall at user release rate (single note)
+    // -----------------------------------------------------------------------
+    static constexpr float kActivityFollowerMs = 50.f;     // EMA time constant
+    static constexpr float kActivityThreshold  = 0.000005f; // below = simple content
+    float harmonicActivity_      = 0.f;
+    float prevSmoothedDet_       = 0.f;   // previous sample's smoothedDet (for delta)
+    float activityCoeff_         = 0.f;   // computed once in prepare()
 
     // Stage 2: gain envelope (user BloomAttackMs / BloomReleaseMs control this)
     float gainEnv_           = 0.f;
@@ -198,7 +225,6 @@ private:
     float fastEnergy_            = 0.f;
     float slowEnergy_            = 0.f;
     float shapedDet_             = 0.f;
-    float prevSmoothedDet_       = 0.f;   // previous sample's smoothedDet (for delta)
     float fastEnergyCoeff_       = 0.f;   // computed once in prepare()
     float slowEnergyCoeff_       = 0.f;   // computed once in prepare()
     float shapedDetReleaseCoeff_ = 0.f;   // computed once in prepare()

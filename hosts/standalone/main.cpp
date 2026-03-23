@@ -92,7 +92,7 @@ static void printUsage(const char* prog)
         "  --master-volume <dB>        Final output level to power amp  [-60, +24] dB  [default: 0]\n"
         "  --bloom-depth <dB>          Bloom max input gain reduction  [0, 24] dB  [default: 6]\n"
         "  --bloom-compensation <r>    Bloom output compensation ratio  [0, 2]  [default: 0.5]\n"
-        "  --bloom-mode <mode>         Bloom envelope mode: shaped or tracking  [default: shaped]\n"
+        "  --bloom-mode <mode>         Bloom envelope mode: shaped, tracking, or adaptive  [default: shaped]\n"
         "  --input-channel <N>         Capture channel: 0=left, 1=right  [default: 0]\n"
         "  --midi-device <hw:X,Y,Z>    ALSA raw MIDI input device\n"
         "  --midi-cc <cc>:<ParamName>  Map a MIDI CC to a parameter  (repeatable)\n"
@@ -216,8 +216,10 @@ static bool parseArgs(int argc, char** argv, Args& args)
                 args.bloomMode = 0;
             } else if (std::strcmp(v, "tracking") == 0) {
                 args.bloomMode = 1;
+            } else if (std::strcmp(v, "adaptive") == 0) {
+                args.bloomMode = 2;
             } else {
-                std::fprintf(stderr, "Error: --bloom-mode must be 'shaped' or 'tracking', got '%s'\n", v);
+                std::fprintf(stderr, "Error: --bloom-mode must be 'shaped', 'tracking', or 'adaptive', got '%s'\n", v);
                 return false;
             }
         } else if (std::strcmp(key, "--input-channel") == 0) {
@@ -534,6 +536,7 @@ int main(int argc, char** argv)
             d.bloomSensitivity     = params.get(hexcaster::ParamId::BloomSensitivity_dB);
             d.bloomAttack          = params.get(hexcaster::ParamId::BloomAttackMs);
             d.bloomRelease         = params.get(hexcaster::ParamId::BloomReleaseMs);
+            d.harmonicActivity     = bloom.getHarmonicActivity();
             d.bloomMode            = static_cast<int>(bloom.getMode());
             d.eqGain               = params.get(hexcaster::ParamId::EqGain_dB);
             d.eqSweep              = params.get(hexcaster::ParamId::EqSweepHz);
@@ -554,9 +557,13 @@ int main(int argc, char** argv)
         // bloom.setMode() is an atomic store -- safe from any thread.
         auto modeToggle = [&]() -> int {
             const auto cur = bloom.getMode();
-            const auto next = (cur == hexcaster::BloomMode::Shaped)
-                            ? hexcaster::BloomMode::Tracking
-                            : hexcaster::BloomMode::Shaped;
+            hexcaster::BloomMode next;
+            switch (cur) {
+                case hexcaster::BloomMode::Shaped:   next = hexcaster::BloomMode::Tracking; break;
+                case hexcaster::BloomMode::Tracking:  next = hexcaster::BloomMode::Adaptive; break;
+                case hexcaster::BloomMode::Adaptive:  next = hexcaster::BloomMode::Shaped;   break;
+                default:                              next = hexcaster::BloomMode::Shaped;   break;
+            }
             bloom.setMode(next);
             return static_cast<int>(next);
         };

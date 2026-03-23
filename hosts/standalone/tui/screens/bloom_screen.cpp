@@ -23,6 +23,14 @@ std::vector<MeterDesc> buildBloomScreenMeters()
             [](const MeterData& d) { return d.bloomEnvelope; },
             ""),
 
+        // Harmonic activity: EMA of |delta(smoothedDet)|.
+        // High = complex harmonic content (chords). Low = single note / silence.
+        // Visible in all modes; used by Adaptive mode for release decisions.
+        // Range [0, 0.0005] covers the useful display range for typical signals.
+        MeterDesc::fromObservationRanged("Activity",
+            [](const MeterData& d) { return d.harmonicActivity; },
+            0.f, 0.0005f, ""),
+
         // Applied pre/post gain: what the BloomController actually set last block.
         // Falls as envelope rises (pre) and rises (post) -- shows dynamic action.
         MeterDesc::fromObservationRanged("Pre dB",
@@ -50,7 +58,9 @@ ftxui::Element renderBloomScreen(const MeterData&              data,
 {
     using namespace ftxui;
 
-    const char* modeName = (data.bloomMode == 1) ? "Tracking" : "Shaped";
+    const char* modeName = "Shaped";
+    if (data.bloomMode == 1) modeName = "Tracking";
+    else if (data.bloomMode == 2) modeName = "Adaptive";
 
     auto titleRow = hbox(Elements{
         text(" Bloom: Dynamic Gain Control") | bold,

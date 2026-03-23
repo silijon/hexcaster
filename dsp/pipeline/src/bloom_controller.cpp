@@ -34,6 +34,9 @@ void BloomController::prepare(float sampleRate, int /*maxBlockSize*/)
     slowEnergyCoeff_         = msToCoeff(kSlowEnergyMs,         sampleRate_);
     shapedDetReleaseCoeff_   = msToCoeff(kShapedDetReleaseMs,   sampleRate_);
 
+    // Harmonic activity metric (all modes)
+    activityCoeff_           = msToCoeff(kActivityFollowerMs,    sampleRate_);
+
     cachedAttackMs_  = -1.f;  // force gain envelope coefficient recompute on first block
     cachedReleaseMs_ = -1.f;
     reset();
@@ -43,10 +46,11 @@ void BloomController::reset()
 {
     detectorEnv_       = 0.f;
     smoothedDetEnv_    = 0.f;
+    harmonicActivity_  = 0.f;
+    prevSmoothedDet_   = 0.f;
     fastEnergy_        = 0.f;
     slowEnergy_        = 0.f;
     shapedDet_         = 0.f;
-    prevSmoothedDet_   = 0.f;
     gainEnv_           = 0.f;
     gainEnvState_      = GainEnvState::Release;
     hpfX1_             = 0.f;
@@ -76,84 +80,87 @@ void BloomController::preProcess(const float* buffer, int numSamples)
         updateCoefficients();
     }
 
-    // Run detector HPF + two-stage envelope per-sample across the block.
+    // Run detector HPF + envelope per-sample across the block.
     // The HPF is applied to the detection signal only -- the audio buffer
     // is const and is not modified.
     const auto mode = static_cast<BloomMode>(mode_.load(std::memory_order_relaxed));
 
     float detEnv      = detectorEnv_;
     float smoothedDet = smoothedDetEnv_;
+    float harmAct     = harmonicActivity_;
+    float prevSD      = prevSmoothedDet_;
     float fastE       = fastEnergy_;
     float slowE       = slowEnergy_;
     float sDet        = shapedDet_;
-    float prevSD      = prevSmoothedDet_;
     float gainEnv     = gainEnv_;
     auto  gainEnvSt   = gainEnvState_;
 
     for (int i = 0; i < numSamples; ++i) {
+        // ---------------------------------------------------------------
         // Stage 1a: detector HPF (sidechain only, not audio path)
+        // ---------------------------------------------------------------
         const float x      = buffer[i];
         const float hpfOut = hpfB0_ * x + hpfB1_ * hpfX1_ - hpfA1_ * hpfY1_;
         hpfX1_ = x;
         hpfY1_ = hpfOut;
 
-        // Stage 1b: fast peak detector.
-        // Sensitivity scales the detection signal to normalise raw ADC amplitude.
-        // Near-instantaneous attack (0.1ms) captures note onsets immediately.
-        // Release is 30ms -- fast enough to track amplitude changes but slow
-        // enough to reduce per-cycle harmonic ripple on sustained notes.
+        // ---------------------------------------------------------------
+        // Stage 1b: fast peak detector
+        // ---------------------------------------------------------------
         const float absSample = (hpfOut < 0.f ? -hpfOut : hpfOut) * sensitivityLin;
         if (absSample > detEnv)
             detEnv = detectorAttackCoeff_  * detEnv + (1.f - detectorAttackCoeff_)  * absSample;
         else
             detEnv = detectorReleaseCoeff_ * detEnv + (1.f - detectorReleaseCoeff_) * absSample;
 
-        // Stage 1c: one-pole LPF on detector output (15ms).
-        // Removes residual harmonic-beating ripple from the detector signal.
+        // ---------------------------------------------------------------
+        // Stage 1c: smoothing LPF on detector output (15ms)
+        // ---------------------------------------------------------------
         smoothedDet = detectorSmoothCoeff_ * smoothedDet
                     + (1.f - detectorSmoothCoeff_) * detEnv;
 
-        // Stage 2: gain envelope.
-        // Mode determines how the gain envelope responds to the detector.
-        if (mode == BloomMode::Shaped) {
-            // Stage 1d (Shaped only): combined transient detector.
-            //
-            // Two complementary onset detection methods, OR'd together:
-            //
-            //   1. Energy ratio: fast (~3ms) / slow (~150ms) EMA followers.
-            //      Detects first note from silence (ratio > 2.5x). Immune
-            //      to chord beating (both followers track similar levels).
-            //      Misses repeated notes at similar volume (slow follower
-            //      stays elevated).
-            //
-            //   2. Delta (rate of change): per-sample rise in smoothedDet.
-            //      Detects new notes over existing signal (fast attack
-            //      produces large delta). Immune to chord beating (slow
-            //      swells produce tiny deltas). Covers the energy ratio's
-            //      blind spot for repeated notes.
-            //
-            // When either fires, shapedDet is set to the current signal
-            // level. Otherwise shapedDet decays to zero at ~20ms.
-            fastE = fastEnergyCoeff_ * fastE + (1.f - fastEnergyCoeff_) * smoothedDet;
-            slowE = slowEnergyCoeff_ * slowE + (1.f - slowEnergyCoeff_) * smoothedDet;
+        // ---------------------------------------------------------------
+        // Shared: delta + harmonic activity (computed in ALL modes)
+        //
+        // delta:    per-sample rate of change of the smoothed detector.
+        // harmAct:  running EMA of |delta|. High = complex harmonic content
+        //           (chord beating). Low = clean single-note decay or silence.
+        //
+        // Used by:  Shaped mode (delta for onset detection)
+        //           Adaptive mode (harmAct for release mode switching)
+        //           TUI (harmAct meter, all modes)
+        // ---------------------------------------------------------------
+        const float delta    = smoothedDet - prevSD;
+        const float absDelta = (delta < 0.f) ? -delta : delta;
+        harmAct = activityCoeff_ * harmAct + (1.f - activityCoeff_) * absDelta;
+        prevSD  = smoothedDet;
 
+        // ---------------------------------------------------------------
+        // Energy followers (Shaped mode uses for onset detection;
+        //                   updated in all modes to stay warm for switching)
+        // ---------------------------------------------------------------
+        fastE = fastEnergyCoeff_ * fastE + (1.f - fastEnergyCoeff_) * smoothedDet;
+        slowE = slowEnergyCoeff_ * slowE + (1.f - slowEnergyCoeff_) * smoothedDet;
+
+        // ---------------------------------------------------------------
+        // Stage 2: gain envelope (mode-specific)
+        // ---------------------------------------------------------------
+        if (mode == BloomMode::Shaped) {
+            // Combined energy-ratio + delta onset detector.
+            // Energy ratio catches first-note-from-silence.
+            // Delta catches repeated notes over existing signal.
+            // Chord beating fails both (ratio ~1.0, delta small).
             const float ratio = fastE / (slowE + 1e-10f);
-            const float delta = smoothedDet - prevSD;
 
             const bool ratioOnset = (ratio > kOnsetRatioThreshold);
             const bool deltaOnset = (delta > kFastDeltaThreshold);
 
-            if (ratioOnset || deltaOnset) {
+            if (ratioOnset || deltaOnset)
                 sDet = smoothedDet;
-            } else {
+            else
                 sDet = shapedDetReleaseCoeff_ * sDet;
-            }
-            prevSD = smoothedDet;
 
-            // Shaped gain envelope: state-machine driven by shapedDet.
-            // Because shapedDet decays to zero after the transient, the
-            // gain envelope can release all the way to zero at the user's
-            // rate without being re-triggered by sustained audio.
+            // State-machine gain envelope driven by shapedDet.
             if (gainEnvSt == GainEnvState::Release) {
                 gainEnv = gainReleaseCoeff_ * gainEnv;
                 if (sDet > gainEnv + kOnsetThreshold)
@@ -164,16 +171,28 @@ void BloomController::preProcess(const float* buffer, int numSamples)
                 if (sDet < gainEnv)
                     gainEnvSt = GainEnvState::Release;
             }
+
+        } else if (mode == BloomMode::Adaptive) {
+            // Adaptive: defaults to Tracking behaviour (follow detector).
+            // When harmonic activity drops below threshold (simple content /
+            // single note), release disconnects from audio and freefalls
+            // at the user's release rate.
+            if (smoothedDet > gainEnv) {
+                // Attack: track detector upward at user attack rate
+                gainEnv = gainAttackCoeff_ * gainEnv + (1.f - gainAttackCoeff_) * smoothedDet;
+            } else if (harmAct > kActivityThreshold) {
+                // Rich harmonic content (chord): track audio down gently
+                gainEnv = gainReleaseCoeff_ * gainEnv + (1.f - gainReleaseCoeff_) * smoothedDet;
+            } else {
+                // Simple content (single note decay): freefall to zero
+                gainEnv = gainReleaseCoeff_ * gainEnv;
+            }
+
         } else {
             // Tracking: smoothly follow detector using user attack/release.
             // Release targets smoothedDet (tracks audio), not zero.
-            // Energy followers + prevSD updated to stay warm for mode switching.
-            fastE = fastEnergyCoeff_ * fastE + (1.f - fastEnergyCoeff_) * smoothedDet;
-            slowE = slowEnergyCoeff_ * slowE + (1.f - slowEnergyCoeff_) * smoothedDet;
-            prevSD = smoothedDet;
-
             if (smoothedDet > gainEnv)
-                gainEnv = gainAttackCoeff_  * gainEnv + (1.f - gainAttackCoeff_)  * smoothedDet;
+                gainEnv = gainAttackCoeff_ * gainEnv + (1.f - gainAttackCoeff_) * smoothedDet;
             else
                 gainEnv = gainReleaseCoeff_ * gainEnv + (1.f - gainReleaseCoeff_) * smoothedDet;
         }
@@ -181,22 +200,24 @@ void BloomController::preProcess(const float* buffer, int numSamples)
 
     detectorEnv_       = detEnv;
     smoothedDetEnv_    = smoothedDet;
+    harmonicActivity_  = harmAct;
+    prevSmoothedDet_   = prevSD;
     fastEnergy_        = fastE;
     slowEnergy_        = slowE;
     shapedDet_         = sDet;
-    prevSmoothedDet_   = prevSD;
     gainEnv_           = gainEnv;
     gainEnvState_      = gainEnvSt;
 
-    // Publish envelopes for TUI observation (relaxed -- no ordering required).
-    // In Shaped mode, show the transient detector (shapedDet) so you can see
-    // it pulse on onset and decay to zero. In Tracking mode, show smoothedDet
-    // (continuous audio tracker). The gain envelope is always shown.
+    // Publish observations for TUI.
+    // Det Env: shapedDet in Shaped mode (transient pulses), smoothedDet otherwise.
+    // Gain Env: always the gain envelope.
+    // Harmonic Activity: always published (visible on bloom screen in all modes).
     const float detForTui = (mode == BloomMode::Shaped)
                           ? std::clamp(sDet, 0.f, 1.f)
                           : std::clamp(smoothedDet, 0.f, 1.f);
     observedDetectorEnv_.store(detForTui, std::memory_order_relaxed);
     observedEnvelope_.store(std::clamp(gainEnv, 0.f, 1.f), std::memory_order_relaxed);
+    observedHarmonicActivity_.store(harmAct, std::memory_order_relaxed);
 
     // Clamp for the gain formulas (safety net -- gainEnv should already be [0,1]).
     const float clampedEnv = std::clamp(gainEnv, 0.f, 1.f);
@@ -230,6 +251,11 @@ float BloomController::getEnvelope() const
 float BloomController::getDetectorEnvelope() const
 {
     return observedDetectorEnv_.load(std::memory_order_relaxed);
+}
+
+float BloomController::getHarmonicActivity() const
+{
+    return observedHarmonicActivity_.load(std::memory_order_relaxed);
 }
 
 void BloomController::setBasePreDb(float db)
