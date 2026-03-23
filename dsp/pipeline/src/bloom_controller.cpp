@@ -114,7 +114,7 @@ void BloomController::preProcess(const float* buffer, int numSamples)
             // Sustain and natural decay produce zero/negative delta, so
             // shapedDet decays freely to zero regardless of audio level.
             const float delta = smoothedDet - prevSD;
-            if (delta > 0.f)
+            if (delta > kTransientDeltaThreshold)
                 sDet = std::min(sDet + delta, 1.f);
             else
                 sDet = shapedDetReleaseCoeff_ * sDet;

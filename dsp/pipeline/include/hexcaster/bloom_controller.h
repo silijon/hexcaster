@@ -176,7 +176,12 @@ private:
     // note onset, then decays to zero quickly. Only grows while the signal is
     // actively rising -- sustain and natural decay produce zero or negative
     // deltas, so shapedDet decays freely to zero regardless of audio level.
-    static constexpr float kShapedDetReleaseMs = 20.f;   // fast decay to zero after transient
+    static constexpr float kShapedDetReleaseMs = 20.f;    // fast decay to zero after transient
+    static constexpr float kTransientDeltaThreshold = 0.0005f;  // min per-sample rise in
+                                                                 // smoothedDet to count as a
+                                                                 // transient. Filters out chord
+                                                                 // beating wobble while passing
+                                                                 // genuine note onsets.
     float shapedDet_             = 0.f;
     float shapedDetReleaseCoeff_ = 0.f;   // computed once in prepare()
     float prevSmoothedDet_       = 0.f;   // previous sample's smoothedDet (for delta)
