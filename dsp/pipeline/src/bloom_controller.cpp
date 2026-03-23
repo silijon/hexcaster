@@ -36,11 +36,12 @@ void BloomController::prepare(float sampleRate, int /*maxBlockSize*/)
 
 void BloomController::reset()
 {
-    detectorEnv_   = 0.f;
+    detectorEnv_    = 0.f;
     smoothedDetEnv_ = 0.f;
-    gainEnv_       = 0.f;
-    hpfX1_         = 0.f;
-    hpfY1_         = 0.f;
+    gainEnv_        = 0.f;
+    gainEnvState_   = GainEnvState::Release;
+    hpfX1_          = 0.f;
+    hpfY1_          = 0.f;
 }
 
 // ---------------------------------------------------------------------------
@@ -69,9 +70,12 @@ void BloomController::preProcess(const float* buffer, int numSamples)
     // Run detector HPF + two-stage envelope per-sample across the block.
     // The HPF is applied to the detection signal only -- the audio buffer
     // is const and is not modified.
+    const auto mode = static_cast<BloomMode>(mode_.load(std::memory_order_relaxed));
+
     float detEnv      = detectorEnv_;
     float smoothedDet = smoothedDetEnv_;
     float gainEnv     = gainEnv_;
+    auto  gainEnvSt   = gainEnvState_;
 
     for (int i = 0; i < numSamples; ++i) {
         // Stage 1a: detector HPF (sidechain only, not audio path)
@@ -99,20 +103,37 @@ void BloomController::preProcess(const float* buffer, int numSamples)
         smoothedDet = detectorSmoothCoeff_ * smoothedDet
                     + (1.f - detectorSmoothCoeff_) * detEnv;
 
-        // Stage 2: gain envelope (user attack/release shape the gain response).
-        // Uses smoothedDet (not raw detEnv) to avoid ripple-driven re-triggering
-        // of the attack branch during note decay.
-        // Attack: ramp toward smoothedDet at the user attack rate.
-        // Release: decay toward zero at the user release rate, independently.
-        if (smoothedDet > gainEnv)
-            gainEnv = gainAttackCoeff_  * gainEnv + (1.f - gainAttackCoeff_)  * smoothedDet;
-        else
-            gainEnv = gainReleaseCoeff_ * gainEnv;
+        // Stage 2: gain envelope.
+        // Mode determines how the gain envelope responds to the detector.
+        if (mode == BloomMode::Shaped) {
+            // Shaped: state-machine driven.
+            // Release: decay toward zero at user release rate (independent of audio).
+            // Attack: only re-triggered when detector exceeds gainEnv by a
+            //         meaningful threshold (prevents ripple re-triggering).
+            if (gainEnvSt == GainEnvState::Release) {
+                gainEnv = gainReleaseCoeff_ * gainEnv;
+                if (smoothedDet > gainEnv + kOnsetThreshold)
+                    gainEnvSt = GainEnvState::Attack;
+            }
+            if (gainEnvSt == GainEnvState::Attack) {
+                gainEnv = gainAttackCoeff_ * gainEnv + (1.f - gainAttackCoeff_) * smoothedDet;
+                if (smoothedDet < gainEnv)
+                    gainEnvSt = GainEnvState::Release;
+            }
+        } else {
+            // Tracking: smoothly follow detector using user attack/release.
+            // Release targets smoothedDet (tracks audio), not zero.
+            if (smoothedDet > gainEnv)
+                gainEnv = gainAttackCoeff_  * gainEnv + (1.f - gainAttackCoeff_)  * smoothedDet;
+            else
+                gainEnv = gainReleaseCoeff_ * gainEnv + (1.f - gainReleaseCoeff_) * smoothedDet;
+        }
     }
 
     detectorEnv_    = detEnv;
     smoothedDetEnv_ = smoothedDet;
     gainEnv_        = gainEnv;
+    gainEnvState_   = gainEnvSt;
 
     // Publish both envelopes for TUI observation (relaxed -- no ordering required).
     // smoothedDet: what the gain envelope sees -- smooth audio tracker.
@@ -187,6 +208,16 @@ void BloomController::setReleaseMs(float ms)
 void BloomController::setSensitivity(float db)
 {
     sensitivity_.store(std::clamp(db, 0.f, 40.f), std::memory_order_relaxed);
+}
+
+void BloomController::setMode(BloomMode m)
+{
+    mode_.store(static_cast<uint8_t>(m), std::memory_order_relaxed);
+}
+
+BloomMode BloomController::getMode() const
+{
+    return static_cast<BloomMode>(mode_.load(std::memory_order_relaxed));
 }
 
 // ---------------------------------------------------------------------------

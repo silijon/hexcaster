@@ -65,6 +65,7 @@ struct Args {
     float        bloomDepth           = 6.f;
     float        bloomCompensation    = 0.5f;
     int          inputChannel         = 0;
+    int          bloomMode            = 0;      // 0 = Shaped (default), 1 = Tracking
     bool         listDevices    = false;
     bool         listMidi       = false;
     bool         help           = false;
@@ -91,6 +92,7 @@ static void printUsage(const char* prog)
         "  --master-volume <dB>        Final output level to power amp  [-60, +24] dB  [default: 0]\n"
         "  --bloom-depth <dB>          Bloom max input gain reduction  [0, 24] dB  [default: 6]\n"
         "  --bloom-compensation <r>    Bloom output compensation ratio  [0, 2]  [default: 0.5]\n"
+        "  --bloom-mode <mode>         Bloom envelope mode: shaped or tracking  [default: shaped]\n"
         "  --input-channel <N>         Capture channel: 0=left, 1=right  [default: 0]\n"
         "  --midi-device <hw:X,Y,Z>    ALSA raw MIDI input device\n"
         "  --midi-cc <cc>:<ParamName>  Map a MIDI CC to a parameter  (repeatable)\n"
@@ -208,6 +210,16 @@ static bool parseArgs(int argc, char** argv, Args& args)
         } else if (std::strcmp(key, "--bloom-compensation") == 0) {
             const char* v = nextArg(); if (!v) return false;
             args.bloomCompensation = static_cast<float>(std::atof(v));
+        } else if (std::strcmp(key, "--bloom-mode") == 0) {
+            const char* v = nextArg(); if (!v) return false;
+            if (std::strcmp(v, "shaped") == 0) {
+                args.bloomMode = 0;
+            } else if (std::strcmp(v, "tracking") == 0) {
+                args.bloomMode = 1;
+            } else {
+                std::fprintf(stderr, "Error: --bloom-mode must be 'shaped' or 'tracking', got '%s'\n", v);
+                return false;
+            }
         } else if (std::strcmp(key, "--input-channel") == 0) {
             const char* v = nextArg(); if (!v) return false;
             args.inputChannel = std::atoi(v);
@@ -367,6 +379,7 @@ int main(int argc, char** argv)
     hexcaster::BloomController bloom(bloomPreGain, bloomPostGain);
     bloom.setDepth(args.bloomDepth);
     bloom.setCompensation(args.bloomCompensation);
+    bloom.setMode(static_cast<hexcaster::BloomMode>(args.bloomMode));
 
     hexcaster::Pipeline pipeline;
     pipeline.addStage(&noiseGate);      // stage 0: noise gate
@@ -521,6 +534,7 @@ int main(int argc, char** argv)
             d.bloomSensitivity     = params.get(hexcaster::ParamId::BloomSensitivity_dB);
             d.bloomAttack          = params.get(hexcaster::ParamId::BloomAttackMs);
             d.bloomRelease         = params.get(hexcaster::ParamId::BloomReleaseMs);
+            d.bloomMode            = static_cast<int>(bloom.getMode());
             d.eqGain               = params.get(hexcaster::ParamId::EqGain_dB);
             d.eqSweep              = params.get(hexcaster::ParamId::EqSweepHz);
             d.eqQ                  = params.get(hexcaster::ParamId::EqQ);
@@ -535,9 +549,21 @@ int main(int argc, char** argv)
             engine.run();
         });
 
+        // Mode toggle callback: cycles Shaped -> Tracking -> Shaped.
+        // Called from the TUI thread when user presses 'm' on the Bloom screen.
+        // bloom.setMode() is an atomic store -- safe from any thread.
+        auto modeToggle = [&]() -> int {
+            const auto cur = bloom.getMode();
+            const auto next = (cur == hexcaster::BloomMode::Shaped)
+                            ? hexcaster::BloomMode::Tracking
+                            : hexcaster::BloomMode::Shaped;
+            bloom.setMode(next);
+            return static_cast<int>(next);
+        };
+
         // Run TUI on the main thread (FTXUI owns the terminal here).
         {
-            hexcaster::tui::Tui tui(snapshotFn, params, midiMap, gQuit);
+            hexcaster::tui::Tui tui(snapshotFn, params, midiMap, gQuit, modeToggle);
             tui.run();
         }
 

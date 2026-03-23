@@ -49,17 +49,24 @@ ftxui::Element renderBloomScreen(const MeterData&              data,
                                  const MidiMap&                midiMap)
 {
     using namespace ftxui;
-    (void)data;
 
-    auto infoRow = hbox(Elements{
-        text(" Envelope drives pre-gain reduction and post-gain compensation") | dim,
+    const char* modeName = (data.bloomMode == 1) ? "Tracking" : "Shaped";
+
+    auto titleRow = hbox(Elements{
+        text(" Bloom: Dynamic Gain Control") | bold,
+        text("    "),
+        text("Mode: ") | dim,
+        text(modeName) | bold | color(Color::Cyan),
+        text("  (m to toggle)") | dim,
     });
     return vbox(Elements{
-        text(" Bloom: Dynamic Gain Control") | bold,
+        titleRow,
         text(""),
         makeMeterRow(meters, selectedIdx, data, registry, midiMap),
         text(""),
-        infoRow,
+        hbox(Elements{
+            text(" Envelope drives pre-gain reduction and post-gain compensation") | dim,
+        }),
     });
 }
 

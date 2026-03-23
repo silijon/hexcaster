@@ -59,6 +59,19 @@ namespace hexcaster {
  *   - preProcess() is RT-safe: no allocation, no I/O, bounded time.
  *   - Atomic params read once per block, not per-sample.
  */
+/**
+ * BloomMode selects how the gain envelope responds to the detector.
+ *
+ *   Shaped:   State-machine driven. Attack ramps toward detector on new note
+ *             onset; release decays toward zero independently of the audio.
+ *             Clean, predictable attack/release contours.
+ *
+ *   Tracking: Gain envelope smoothly follows the detector using the user's
+ *             attack/release as a two-pole smoother. Gain tracks the audio
+ *             dynamics rather than imposing an independent decay shape.
+ */
+enum class BloomMode : uint8_t { Shaped = 0, Tracking = 1 };
+
 class BloomController : public PipelineController {
 public:
     /**
@@ -91,6 +104,12 @@ public:
     void setReleaseMs(float ms);
     void setSensitivity(float db);  // detection signal gain [0, 40] dB
 
+    /** Set the bloom gain envelope mode. Thread-safe. */
+    void setMode(BloomMode m);
+
+    /** Read the current bloom mode. Thread-safe. */
+    BloomMode getMode() const;
+
     /**
      * Read the current gain envelope value [0.0, 1.0].
      * This is what drives the bloom pre/post gains. Its shape is governed
@@ -122,6 +141,7 @@ private:
     std::atomic<float> attackMs_     { 5.f   };
     std::atomic<float> releaseMs_    { 100.f };
     std::atomic<float> sensitivity_  { 20.f  }; // dB
+    std::atomic<uint8_t> mode_       { static_cast<uint8_t>(BloomMode::Shaped) };
 
     // --- Observation atomics (written by audio thread, read by TUI thread) ---
     // Updated once per block at the end of preProcess(). Relaxed ordering.
@@ -150,6 +170,15 @@ private:
     float gainReleaseCoeff_  = 0.f;   // recomputed when params change
     float cachedAttackMs_    = -1.f;
     float cachedReleaseMs_   = -1.f;
+
+    // Shaped mode state machine
+    enum class GainEnvState : uint8_t { Attack, Release };
+    GainEnvState gainEnvState_ = GainEnvState::Release;
+
+    // Onset detection threshold for Shaped mode: the smoothed detector must
+    // exceed the gain envelope by this amount to re-trigger attack. Prevents
+    // the gain envelope from re-triggering on residual ripple during note decay.
+    static constexpr float kOnsetThreshold = 0.05f;
 
     // Detector HPF state (1st-order high-pass, 100 Hz fixed)
     static constexpr float kDetectorHpfHz = 100.f;
