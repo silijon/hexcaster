@@ -28,6 +28,10 @@ void BloomController::prepare(float sampleRate, int /*maxBlockSize*/)
     detectorAttackCoeff_     = msToCoeff(kDetectorAttackMs,     sampleRate_);
     detectorReleaseCoeff_    = msToCoeff(kDetectorReleaseMs,    sampleRate_);
     detectorSmoothCoeff_     = msToCoeff(kDetectorSmoothMs,     sampleRate_);
+
+    // Shaped mode: energy comparator + transient decay
+    fastEnergyCoeff_         = msToCoeff(kFastEnergyMs,         sampleRate_);
+    slowEnergyCoeff_         = msToCoeff(kSlowEnergyMs,         sampleRate_);
     shapedDetReleaseCoeff_   = msToCoeff(kShapedDetReleaseMs,   sampleRate_);
 
     cachedAttackMs_  = -1.f;  // force gain envelope coefficient recompute on first block
@@ -39,8 +43,9 @@ void BloomController::reset()
 {
     detectorEnv_       = 0.f;
     smoothedDetEnv_    = 0.f;
+    fastEnergy_        = 0.f;
+    slowEnergy_        = 0.f;
     shapedDet_         = 0.f;
-    prevSmoothedDet_   = 0.f;
     gainEnv_           = 0.f;
     gainEnvState_      = GainEnvState::Release;
     hpfX1_             = 0.f;
@@ -77,8 +82,9 @@ void BloomController::preProcess(const float* buffer, int numSamples)
 
     float detEnv      = detectorEnv_;
     float smoothedDet = smoothedDetEnv_;
+    float fastE       = fastEnergy_;
+    float slowE       = slowEnergy_;
     float sDet        = shapedDet_;
-    float prevSD      = prevSmoothedDet_;
     float gainEnv     = gainEnv_;
     auto  gainEnvSt   = gainEnvState_;
 
@@ -108,23 +114,28 @@ void BloomController::preProcess(const float* buffer, int numSamples)
         // Stage 2: gain envelope.
         // Mode determines how the gain envelope responds to the detector.
         if (mode == BloomMode::Shaped) {
-            // Stage 1d (Shaped only): delta-based transient detector.
-            // Accumulates the positive rate of change of smoothedDet.
-            // Only grows while the signal is actively rising (note onset).
-            // Sustain and natural decay produce zero/negative delta, so
-            // shapedDet decays freely to zero regardless of audio level.
-            const float delta = smoothedDet - prevSD;
-            // Allow transient accumulation when:
-            //   - gainEnv has substantially released (near silence) -- normal onset, OR
-            //   - the delta is very large (unmistakably a new note strike) -- force onset.
-            // This prevents chord beating (small deltas during elevated gainEnv)
-            // from re-triggering shapedDet, while still catching fast repeated notes.
-            const bool canTrigger  = (gainEnv < kRetriggerThreshold);
-            const bool forceOnset  = (delta   > kForceOnsetDelta);
-            if ((canTrigger || forceOnset) && delta > 0.f)
-                sDet = std::min(sDet + delta, 1.f);
-            else
+            // Stage 1d (Shaped only): energy-ratio transient detector.
+            //
+            // Two EMA followers track the smoothed detector at different
+            // rates: fast (~3ms) responds to immediate transients, slow
+            // (~150ms) tracks the background energy level. A genuine note
+            // onset produces a large fast/slow ratio (>2.5x); chord
+            // beating during sustain keeps both followers near the same
+            // level (ratio ≈ 1.0).
+            //
+            // When an onset is detected, shapedDet is set to the current
+            // signal level. Otherwise it decays to zero at ~20ms.
+            fastE = fastEnergyCoeff_ * fastE + (1.f - fastEnergyCoeff_) * smoothedDet;
+            slowE = slowEnergyCoeff_ * slowE + (1.f - slowEnergyCoeff_) * smoothedDet;
+
+            const float ratio = fastE / (slowE + 1e-10f);
+            if (ratio > kOnsetRatioThreshold) {
+                // Onset detected: set shapedDet to current signal level
+                sDet = smoothedDet;
+            } else {
+                // No onset: fast decay to zero
                 sDet = shapedDetReleaseCoeff_ * sDet;
+            }
 
             // Shaped gain envelope: state-machine driven by shapedDet.
             // Because shapedDet decays to zero after the transient, the
@@ -143,20 +154,22 @@ void BloomController::preProcess(const float* buffer, int numSamples)
         } else {
             // Tracking: smoothly follow detector using user attack/release.
             // Release targets smoothedDet (tracks audio), not zero.
+            // Energy followers still updated to stay warm for mode switching.
+            fastE = fastEnergyCoeff_ * fastE + (1.f - fastEnergyCoeff_) * smoothedDet;
+            slowE = slowEnergyCoeff_ * slowE + (1.f - slowEnergyCoeff_) * smoothedDet;
+
             if (smoothedDet > gainEnv)
                 gainEnv = gainAttackCoeff_  * gainEnv + (1.f - gainAttackCoeff_)  * smoothedDet;
             else
                 gainEnv = gainReleaseCoeff_ * gainEnv + (1.f - gainReleaseCoeff_) * smoothedDet;
         }
-
-        // Always update prevSD so it's valid if user switches modes mid-session
-        prevSD = smoothedDet;
     }
 
     detectorEnv_       = detEnv;
     smoothedDetEnv_    = smoothedDet;
+    fastEnergy_        = fastE;
+    slowEnergy_        = slowE;
     shapedDet_         = sDet;
-    prevSmoothedDet_   = prevSD;
     gainEnv_           = gainEnv;
     gainEnvState_      = gainEnvSt;
 

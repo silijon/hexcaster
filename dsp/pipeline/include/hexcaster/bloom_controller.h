@@ -171,36 +171,38 @@ private:
     float cachedAttackMs_    = -1.f;
     float cachedReleaseMs_   = -1.f;
 
-    // Shaped mode: transient detector (delta-based)
-    // Accumulates the positive rate of change (rising edge) of smoothedDet on
-    // note onset, then decays to zero quickly. Only grows while the signal is
-    // actively rising -- sustain and natural decay produce zero or negative
-    // deltas, so shapedDet decays freely to zero regardless of audio level.
-    static constexpr float kShapedDetReleaseMs = 20.f;    // fast decay to zero after transient
+    // -----------------------------------------------------------------------
+    // Shaped mode: energy-ratio transient detector
+    //
+    // Compares short-term energy (fast follower, ~3ms) to long-term energy
+    // (slow follower, ~150ms). A note onset produces a large ratio (short
+    // jumps while long is still low); chord beating during sustain produces
+    // a ratio near 1.0 (both followers track similar levels).
+    //
+    // When the ratio exceeds kOnsetRatioThreshold, shapedDet is set to the
+    // current signal level. Otherwise shapedDet decays to zero at
+    // kShapedDetReleaseMs. The gain envelope state machine is driven by
+    // shapedDet, so it can release cleanly to zero without re-triggering
+    // on sustained audio or chord beating.
+    // -----------------------------------------------------------------------
+    static constexpr float kFastEnergyMs         =   3.f;  // short-term follower
+    static constexpr float kSlowEnergyMs         = 150.f;  // long-term follower
+    static constexpr float kOnsetRatioThreshold  =   2.5f; // fast/slow ratio for onset
+    static constexpr float kShapedDetReleaseMs   =  20.f;  // shapedDet decay to zero
 
-    // Transient gating thresholds for Shaped mode:
-    //
-    // kRetriggerThreshold: gainEnv must be below this to allow normal onset
-    //   detection. Prevents chord beating (which happens while gainEnv is
-    //   still elevated) from re-triggering shapedDet.
-    //
-    // kForceOnsetDelta: if the per-sample delta exceeds this, the onset is
-    //   detected regardless of gainEnv level. Ensures fast repeated notes
-    //   and new notes struck while the previous release is still in progress
-    //   are always captured.
-    static constexpr float kRetriggerThreshold = 0.05f;
-    static constexpr float kForceOnsetDelta    = 0.003f;
+    float fastEnergy_            = 0.f;
+    float slowEnergy_            = 0.f;
     float shapedDet_             = 0.f;
+    float fastEnergyCoeff_       = 0.f;   // computed once in prepare()
+    float slowEnergyCoeff_       = 0.f;   // computed once in prepare()
     float shapedDetReleaseCoeff_ = 0.f;   // computed once in prepare()
-    float prevSmoothedDet_       = 0.f;   // previous sample's smoothedDet (for delta)
 
     // Shaped mode state machine
     enum class GainEnvState : uint8_t { Attack, Release };
     GainEnvState gainEnvState_ = GainEnvState::Release;
 
     // Onset detection threshold for Shaped mode: shapedDet must exceed the
-    // gain envelope by this amount to re-trigger attack. Since shapedDet
-    // decays to zero after the transient, this mainly filters out noise.
+    // gain envelope by this amount to trigger attack. Filters out noise.
     static constexpr float kOnsetThreshold = 0.05f;
 
     // Detector HPF state (1st-order high-pass, 100 Hz fixed)
