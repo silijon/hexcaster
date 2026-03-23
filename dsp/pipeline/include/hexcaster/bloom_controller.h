@@ -190,9 +190,15 @@ private:
     static constexpr float kOnsetRatioThreshold  =   2.5f; // fast/slow ratio for onset
     static constexpr float kShapedDetReleaseMs   =  20.f;  // shapedDet decay to zero
 
+    // Per-sample delta threshold for detecting new notes over existing signal.
+    // A note onset rises at ~0.002/sample; chord beating at ~0.00001/sample.
+    // 0.001 gives a 100x margin above beating while catching moderate onsets.
+    static constexpr float kFastDeltaThreshold   = 0.001f;
+
     float fastEnergy_            = 0.f;
     float slowEnergy_            = 0.f;
     float shapedDet_             = 0.f;
+    float prevSmoothedDet_       = 0.f;   // previous sample's smoothedDet (for delta)
     float fastEnergyCoeff_       = 0.f;   // computed once in prepare()
     float slowEnergyCoeff_       = 0.f;   // computed once in prepare()
     float shapedDetReleaseCoeff_ = 0.f;   // computed once in prepare()
