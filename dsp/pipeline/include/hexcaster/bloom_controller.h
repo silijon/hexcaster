@@ -177,11 +177,19 @@ private:
     // actively rising -- sustain and natural decay produce zero or negative
     // deltas, so shapedDet decays freely to zero regardless of audio level.
     static constexpr float kShapedDetReleaseMs = 20.f;    // fast decay to zero after transient
-    static constexpr float kTransientDeltaThreshold = 0.0005f;  // min per-sample rise in
-                                                                 // smoothedDet to count as a
-                                                                 // transient. Filters out chord
-                                                                 // beating wobble while passing
-                                                                 // genuine note onsets.
+
+    // Transient gating thresholds for Shaped mode:
+    //
+    // kRetriggerThreshold: gainEnv must be below this to allow normal onset
+    //   detection. Prevents chord beating (which happens while gainEnv is
+    //   still elevated) from re-triggering shapedDet.
+    //
+    // kForceOnsetDelta: if the per-sample delta exceeds this, the onset is
+    //   detected regardless of gainEnv level. Ensures fast repeated notes
+    //   and new notes struck while the previous release is still in progress
+    //   are always captured.
+    static constexpr float kRetriggerThreshold = 0.05f;
+    static constexpr float kForceOnsetDelta    = 0.003f;
     float shapedDet_             = 0.f;
     float shapedDetReleaseCoeff_ = 0.f;   // computed once in prepare()
     float prevSmoothedDet_       = 0.f;   // previous sample's smoothedDet (for delta)

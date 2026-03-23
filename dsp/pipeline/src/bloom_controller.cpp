@@ -114,7 +114,14 @@ void BloomController::preProcess(const float* buffer, int numSamples)
             // Sustain and natural decay produce zero/negative delta, so
             // shapedDet decays freely to zero regardless of audio level.
             const float delta = smoothedDet - prevSD;
-            if (delta > kTransientDeltaThreshold)
+            // Allow transient accumulation when:
+            //   - gainEnv has substantially released (near silence) -- normal onset, OR
+            //   - the delta is very large (unmistakably a new note strike) -- force onset.
+            // This prevents chord beating (small deltas during elevated gainEnv)
+            // from re-triggering shapedDet, while still catching fast repeated notes.
+            const bool canTrigger  = (gainEnv < kRetriggerThreshold);
+            const bool forceOnset  = (delta   > kForceOnsetDelta);
+            if ((canTrigger || forceOnset) && delta > 0.f)
                 sDet = std::min(sDet + delta, 1.f);
             else
                 sDet = shapedDetReleaseCoeff_ * sDet;
