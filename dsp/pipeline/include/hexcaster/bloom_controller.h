@@ -171,13 +171,21 @@ private:
     float cachedAttackMs_    = -1.f;
     float cachedReleaseMs_   = -1.f;
 
+    // Shaped mode: transient detector
+    // Follows smoothedDet upward on note onset (peak-hold), then decays to
+    // zero quickly once the transient is over. This gives the gain envelope a
+    // "fire and forget" trigger that doesn't stay elevated during sustain.
+    static constexpr float kShapedDetReleaseMs = 20.f;   // fast decay to zero after transient
+    float shapedDet_             = 0.f;
+    float shapedDetReleaseCoeff_ = 0.f;   // computed once in prepare()
+
     // Shaped mode state machine
     enum class GainEnvState : uint8_t { Attack, Release };
     GainEnvState gainEnvState_ = GainEnvState::Release;
 
-    // Onset detection threshold for Shaped mode: the smoothed detector must
-    // exceed the gain envelope by this amount to re-trigger attack. Prevents
-    // the gain envelope from re-triggering on residual ripple during note decay.
+    // Onset detection threshold for Shaped mode: shapedDet must exceed the
+    // gain envelope by this amount to re-trigger attack. Since shapedDet
+    // decays to zero after the transient, this mainly filters out noise.
     static constexpr float kOnsetThreshold = 0.05f;
 
     // Detector HPF state (1st-order high-pass, 100 Hz fixed)

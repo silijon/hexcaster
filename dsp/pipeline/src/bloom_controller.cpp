@@ -25,9 +25,10 @@ void BloomController::prepare(float sampleRate, int /*maxBlockSize*/)
     computeHpfCoefficients();
 
     // Compute fixed detector coefficients (not user-controlled)
-    detectorAttackCoeff_  = msToCoeff(kDetectorAttackMs,  sampleRate_);
-    detectorReleaseCoeff_ = msToCoeff(kDetectorReleaseMs, sampleRate_);
-    detectorSmoothCoeff_  = msToCoeff(kDetectorSmoothMs,  sampleRate_);
+    detectorAttackCoeff_     = msToCoeff(kDetectorAttackMs,     sampleRate_);
+    detectorReleaseCoeff_    = msToCoeff(kDetectorReleaseMs,    sampleRate_);
+    detectorSmoothCoeff_     = msToCoeff(kDetectorSmoothMs,     sampleRate_);
+    shapedDetReleaseCoeff_   = msToCoeff(kShapedDetReleaseMs,   sampleRate_);
 
     cachedAttackMs_  = -1.f;  // force gain envelope coefficient recompute on first block
     cachedReleaseMs_ = -1.f;
@@ -38,6 +39,7 @@ void BloomController::reset()
 {
     detectorEnv_    = 0.f;
     smoothedDetEnv_ = 0.f;
+    shapedDet_      = 0.f;
     gainEnv_        = 0.f;
     gainEnvState_   = GainEnvState::Release;
     hpfX1_          = 0.f;
@@ -74,6 +76,7 @@ void BloomController::preProcess(const float* buffer, int numSamples)
 
     float detEnv      = detectorEnv_;
     float smoothedDet = smoothedDetEnv_;
+    float sDet        = shapedDet_;
     float gainEnv     = gainEnv_;
     auto  gainEnvSt   = gainEnvState_;
 
@@ -96,28 +99,37 @@ void BloomController::preProcess(const float* buffer, int numSamples)
             detEnv = detectorReleaseCoeff_ * detEnv + (1.f - detectorReleaseCoeff_) * absSample;
 
         // Stage 1c: one-pole LPF on detector output (15ms).
-        // Removes residual harmonic-beating ripple from the detector signal
-        // before it reaches the gain envelope. The LPF adds ~15ms of latency
-        // on the decay side only -- note onsets are still captured fast because
-        // the raw detector (detEnv) rises instantly and pulls smoothedDet up.
+        // Removes residual harmonic-beating ripple from the detector signal.
         smoothedDet = detectorSmoothCoeff_ * smoothedDet
                     + (1.f - detectorSmoothCoeff_) * detEnv;
 
         // Stage 2: gain envelope.
         // Mode determines how the gain envelope responds to the detector.
         if (mode == BloomMode::Shaped) {
-            // Shaped: state-machine driven.
-            // Release: decay toward zero at user release rate (independent of audio).
-            // Attack: only re-triggered when detector exceeds gainEnv by a
-            //         meaningful threshold (prevents ripple re-triggering).
+            // Stage 1d (Shaped only): transient detector.
+            // Follows smoothedDet upward on note onset (peak-hold), then
+            // decays rapidly to zero (~20ms) once the transient is over.
+            // This gives the gain envelope a "fire and forget" trigger.
+            if (smoothedDet > sDet) {
+                // Transient in progress: follow the rising edge
+                sDet = smoothedDet;
+            } else {
+                // Transient over: fast decay to zero
+                sDet = shapedDetReleaseCoeff_ * sDet;
+            }
+
+            // Shaped gain envelope: state-machine driven by shapedDet.
+            // Because shapedDet decays to zero after the transient, the
+            // gain envelope can release all the way to zero at the user's
+            // rate without being re-triggered by sustained audio.
             if (gainEnvSt == GainEnvState::Release) {
                 gainEnv = gainReleaseCoeff_ * gainEnv;
-                if (smoothedDet > gainEnv + kOnsetThreshold)
+                if (sDet > gainEnv + kOnsetThreshold)
                     gainEnvSt = GainEnvState::Attack;
             }
             if (gainEnvSt == GainEnvState::Attack) {
-                gainEnv = gainAttackCoeff_ * gainEnv + (1.f - gainAttackCoeff_) * smoothedDet;
-                if (smoothedDet < gainEnv)
+                gainEnv = gainAttackCoeff_ * gainEnv + (1.f - gainAttackCoeff_) * sDet;
+                if (sDet < gainEnv)
                     gainEnvSt = GainEnvState::Release;
             }
         } else {
@@ -132,14 +144,19 @@ void BloomController::preProcess(const float* buffer, int numSamples)
 
     detectorEnv_    = detEnv;
     smoothedDetEnv_ = smoothedDet;
+    shapedDet_      = sDet;
     gainEnv_        = gainEnv;
     gainEnvState_   = gainEnvSt;
 
-    // Publish both envelopes for TUI observation (relaxed -- no ordering required).
-    // smoothedDet: what the gain envelope sees -- smooth audio tracker.
-    // gainEnv: the gain-driving envelope (user attack/release).
-    observedDetectorEnv_.store(std::clamp(smoothedDet, 0.f, 1.f), std::memory_order_relaxed);
-    observedEnvelope_.store   (std::clamp(gainEnv,     0.f, 1.f), std::memory_order_relaxed);
+    // Publish envelopes for TUI observation (relaxed -- no ordering required).
+    // In Shaped mode, show the transient detector (shapedDet) so you can see
+    // it pulse on onset and decay to zero. In Tracking mode, show smoothedDet
+    // (continuous audio tracker). The gain envelope is always shown.
+    const float detForTui = (mode == BloomMode::Shaped)
+                          ? std::clamp(sDet, 0.f, 1.f)
+                          : std::clamp(smoothedDet, 0.f, 1.f);
+    observedDetectorEnv_.store(detForTui, std::memory_order_relaxed);
+    observedEnvelope_.store(std::clamp(gainEnv, 0.f, 1.f), std::memory_order_relaxed);
 
     // Clamp for the gain formulas (safety net -- gainEnv should already be [0,1]).
     const float clampedEnv = std::clamp(gainEnv, 0.f, 1.f);
