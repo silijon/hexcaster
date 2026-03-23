@@ -171,13 +171,15 @@ private:
     float cachedAttackMs_    = -1.f;
     float cachedReleaseMs_   = -1.f;
 
-    // Shaped mode: transient detector
-    // Follows smoothedDet upward on note onset (peak-hold), then decays to
-    // zero quickly once the transient is over. This gives the gain envelope a
-    // "fire and forget" trigger that doesn't stay elevated during sustain.
+    // Shaped mode: transient detector (delta-based)
+    // Accumulates the positive rate of change (rising edge) of smoothedDet on
+    // note onset, then decays to zero quickly. Only grows while the signal is
+    // actively rising -- sustain and natural decay produce zero or negative
+    // deltas, so shapedDet decays freely to zero regardless of audio level.
     static constexpr float kShapedDetReleaseMs = 20.f;   // fast decay to zero after transient
     float shapedDet_             = 0.f;
     float shapedDetReleaseCoeff_ = 0.f;   // computed once in prepare()
+    float prevSmoothedDet_       = 0.f;   // previous sample's smoothedDet (for delta)
 
     // Shaped mode state machine
     enum class GainEnvState : uint8_t { Attack, Release };
