@@ -19,15 +19,13 @@ add_compile_options(
   $<$<CONFIG:Release>:-ffast-math>
 )
 
-# Optional: flush denormals to zero (x86/ARM)
-add_compile_options(-ffast-math)
-
 # Required for static libs linked into shared MODULE (LV2 plugin)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # Options -- declared before dependencies.cmake so the dependency fetch
 # can condition on them (e.g. FTXUI is only fetched when TUI is ON).
 option(HEXCASTER_BUILD_LV2        "Build LV2 plugin"          ON)
+option(HEXCASTER_BUILD_CLAP       "Build CLAP plugin"          ON)
 option(HEXCASTER_BUILD_STANDALONE "Build standalone runtime"   ON)
 option(HEXCASTER_BUILD_TESTS      "Build tests"                ON)
 option(HEXCASTER_BUILD_TUI        "Build TUI for standalone"   ON)
@@ -45,6 +43,10 @@ endif()
 
 if(HEXCASTER_BUILD_LV2)
   add_subdirectory(hosts/lv2)
+endif()
+
+if(HEXCASTER_BUILD_CLAP)
+  add_subdirectory(hosts/clap)
 endif()
 
 if(HEXCASTER_BUILD_TESTS)

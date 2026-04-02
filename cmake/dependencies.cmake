@@ -1,6 +1,22 @@
 include(FetchContent)
 
 # ---------------------------------------------------------------------------
+# CLAP SDK
+# Header-only C plugin API. MIT license. Used by the CLAP plugin host.
+# Only fetched when HEXCASTER_BUILD_CLAP is ON.
+# ---------------------------------------------------------------------------
+
+if(HEXCASTER_BUILD_CLAP)
+  FetchContent_Declare(
+    clap
+    GIT_REPOSITORY https://github.com/free-audio/clap.git
+    GIT_TAG        1.2.6
+    GIT_SHALLOW    TRUE
+  )
+  FetchContent_MakeAvailable(clap)
+endif()
+
+# ---------------------------------------------------------------------------
 # FTXUI
 # C++ functional terminal UI library. Zero external dependencies, MIT license.
 # Used by the optional standalone TUI mode (--tui flag).
