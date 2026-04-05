@@ -1,10 +1,10 @@
 # HexCaster
 
-Neural dynamic gain amp platform for Linux / Raspberry Pi.
+Neural dynamic gain amp platform for Linux / Raspberry Pi / macOS.
 
 HexCaster is a DSP-core-first guitar amplifier engine built around Neural Amp Modeling (NAM). It provides a noise gate, dynamic pre/post gain control ("Bloom"), and a mid-sweep EQ. The core is real-time safe, framework-independent, and targets embedded deployment on Raspberry Pi 5 driving a physical guitar cabinet.
 
-Hosting wrappers (LV2, standalone daemon) are thin layers over the DSP core. The LV2 plugin is the primary development and validation target; the standalone runtime is the production deployment target.
+Hosting wrappers (LV2, CLAP, standalone daemon) are thin layers over the DSP core. The LV2 and CLAP plugins are the primary development and validation targets; the standalone runtime is the production deployment target.
 
 ## Repository Layout
 
@@ -15,8 +15,9 @@ hexcaster/
 │   └── pipeline/       # Signal flow composition (Pipeline, BloomController)
 ├── params/             # Parameter system (registry, smoothing, MIDI mapping)
 ├── hosts/
-│   ├── lv2/            # LV2 plugin wrapper
-│   └── standalone/     # Headless JACK/ALSA runtime
+│   ├── clap/           # CLAP plugin wrapper (macOS ARM64 + Linux)
+│   ├── lv2/            # LV2 plugin wrapper (Linux)
+│   └── standalone/     # Headless JACK/ALSA runtime (Linux)
 ├── tests/              # Build validation and DSP unit tests
 └── external/           # Dependencies (NeuralAudio fetched via CMake FetchContent)
 ```
@@ -25,18 +26,47 @@ hexcaster/
 
 **Required:**
 - CMake >= 3.18
-- GCC with C++20 support
+- GCC (Linux) or Apple Clang (macOS) with C++20 support
+
+**For standalone runtime (Linux only):**
 - `libasound2-dev` (Debian/Ubuntu) / `alsa-lib-devel` (Fedora)
 
-**For LV2 plugin (optional):**
+**For LV2 plugin (Linux only, optional):**
 - `liblv2-dev` (Debian/Ubuntu) / `lv2-devel` (Fedora)
+
+**For CLAP plugin:**
+- No extra system packages. The CLAP SDK is fetched automatically by CMake.
 
 ## Building
 
-### Configure
+### macOS (CLAP plugin for Reaper)
+
+```sh
+cmake -S . -B build \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_OSX_ARCHITECTURES=arm64 \
+  -DHEXCASTER_BUILD_CLAP=ON \
+  -DHEXCASTER_BUILD_LV2=OFF \
+  -DHEXCASTER_BUILD_STANDALONE=OFF \
+  -DHEXCASTER_BUILD_TUI=OFF \
+  -DHEXCASTER_BUILD_TESTS=OFF
+
+cmake --build build
+```
+
+The plugin bundle is automatically installed to `~/Library/Audio/Plug-Ins/CLAP/hexcaster.clap/` after each build. Rescan plugins in Reaper; the plugin appears as **HexCaster** under CLAP.
+
+To generate a `compile_commands.json` for LSP/editor tooling, add `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` to the configure step, then symlink it to the project root:
+
+```sh
+ln -sf build/compile_commands.json compile_commands.json
+```
+
+### Linux (all targets)
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j$(nproc)
 ```
 
 Build options (all default ON):
@@ -45,11 +75,12 @@ Build options (all default ON):
 cmake -S . -B build \
   -DCMAKE_BUILD_TYPE=Release \
   -DHEXCASTER_BUILD_LV2=ON \
+  -DHEXCASTER_BUILD_CLAP=ON \
   -DHEXCASTER_BUILD_STANDALONE=ON \
   -DHEXCASTER_BUILD_TESTS=ON
 ```
 
-### Build LV2 plugin
+### Build LV2 plugin (Linux)
 
 ```sh
 cmake --build build --target hexcaster_lv2 -j$(nproc)
@@ -58,6 +89,14 @@ cmake --build build --target hexcaster_lv2 -j$(nproc)
 The plugin bundle is automatically installed to `~/.lv2/hexcaster.lv2/` after each build. No separate install step required during development.
 
 To load in Reaper or another LV2 host, rescan plugins. The plugin appears as **HexCaster** under LV2.
+
+### Build CLAP plugin
+
+```sh
+cmake --build build --target hexcaster_clap -j$(nproc)
+```
+
+On macOS the bundle is installed to `~/Library/Audio/Plug-Ins/CLAP/hexcaster.clap/`. On Linux the plugin is installed to `~/.clap/hexcaster.clap`.
 
 ### Build standalone runtime
 
@@ -137,6 +176,34 @@ Or run the test binary directly:
 ```sh
 cmake --install build
 ```
+
+## Loading a NAM Model
+
+Both the LV2 and CLAP plugins use a sidecar file to receive the model path, avoiding any in-plugin file browser requirement.
+
+**Step 1 — write the model path to the sidecar file:**
+
+```sh
+mkdir -p ~/.config/hexcaster
+echo "/path/to/your/model.nam" > ~/.config/hexcaster/model_path
+```
+
+**Step 2 — trigger the reload in your DAW:**
+
+In Reaper (or any LV2/CLAP host), open the HexCaster FX window and set the **Model Reload** parameter from 0 to 1. The plugin loads the model on a background thread — audio continues uninterrupted and the model is live within about a second.
+
+To load a different model, overwrite the sidecar file and toggle Model Reload again.
+
+**Model path is saved with the project.** When you reopen a Reaper project, HexCaster restores the last loaded model automatically via the plugin state mechanism (LV2 state interface / CLAP state extension).
+
+### Recommended models
+
+HexCaster targets real-time performance on Raspberry Pi 5. For development on desktop hardware any NAM model works. For Pi deployment, prefer:
+
+- WaveNet Nano / Feather / Lite variants
+- LSTM models at 1×8 or 1×12 size
+
+`.nam` files are available at [tonehunt.org](https://tonehunt.org).
 
 ## Signal Flow
 
