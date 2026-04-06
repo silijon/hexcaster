@@ -104,11 +104,11 @@ static constexpr ClapParamMeta kParams[] = {
     { (clap_id)hexcaster::ParamId::InputGain_dB,          "Input Gain",        "Input",      -60.0,  24.0,    0.0, false, false },
     { (clap_id)hexcaster::ParamId::BloomBasePre_dB,       "Bloom Pre Gain",    "Bloom",      -24.0,  24.0,    0.0, false, false },
     { (clap_id)hexcaster::ParamId::BloomBasePost_dB,      "Bloom Post Gain",   "Bloom",      -24.0,  24.0,    0.0, false, false },
-    { (clap_id)hexcaster::ParamId::BloomDepth_dB,         "Bloom Depth",       "Bloom",        0.0,  24.0,    6.0, false, false },
+    { (clap_id)hexcaster::ParamId::BloomDepth_dB,         "Bloom Depth",       "Bloom",        0.0,  32.0,    24.0, false, false },
     { (clap_id)hexcaster::ParamId::BloomCompensation,     "Bloom Compensation","Bloom",        0.0,   2.0,    0.5, false, false },
     { (clap_id)hexcaster::ParamId::BloomAttackMs,         "Bloom Attack",      "Bloom",        0.1, 500.0,    5.0, false, false },
-    { (clap_id)hexcaster::ParamId::BloomReleaseMs,        "Bloom Release",     "Bloom",        1.0,5000.0,  100.0, false, false },
-    { (clap_id)hexcaster::ParamId::BloomSensitivity_dB,   "Bloom Sensitivity", "Bloom",        0.0,  40.0,   20.0, false, false },
+    { (clap_id)hexcaster::ParamId::BloomReleaseMs,        "Bloom Release",     "Bloom",        0.1, 500.0,    5.0, false, false },
+    { (clap_id)hexcaster::ParamId::BloomSensitivity_dB,   "Bloom Sensitivity", "Bloom",        0.0,  20.0,   6.0, false, false },
     { (clap_id)hexcaster::ParamId::BloomActivityThreshold,"Bloom Activity",    "Bloom",        0.0,   1.0,   0.01, false, false },
     { (clap_id)hexcaster::ParamId::EqGain_dB,             "EQ Gain",           "EQ",          -12.0,  12.0,   0.0, false, false },
     { (clap_id)hexcaster::ParamId::EqSweepHz,             "EQ Sweep",          "EQ",          300.0,2500.0,1000.0, false, false },
@@ -119,8 +119,8 @@ static constexpr ClapParamMeta kParams[] = {
     { kMeterBloomEnv,    "Bloom Envelope",    "Meters",  0.0,   1.0, 0.0, false, true },
     { kMeterDetectorEnv, "Detector Envelope", "Meters",  0.0,   1.0, 0.0, false, true },
     { kMeterActivity,    "Harmonic Activity", "Meters",  0.0,   1.0, 0.0, false, true },
-    { kMeterPreDb,       "Pre Gain Applied",  "Meters", -60.0, 24.0, 0.0, false, true },
-    { kMeterPostDb,      "Post Gain Applied", "Meters", -60.0, 24.0, 0.0, false, true },
+    { kMeterPreDb,       "Pre Gain Applied",  "Meters", -60.0, 32.0, 0.0, false, true },
+    { kMeterPostDb,      "Post Gain Applied", "Meters", -60.0, 32.0, 0.0, false, true },
 };
 static constexpr uint32_t kNumParams = sizeof(kParams) / sizeof(kParams[0]);
 
@@ -172,6 +172,8 @@ struct HexCasterCLAP {
         : host(h)
         , bloom(bloomPreGain, bloomPostGain)
     {
+
+        bloom.setMode(hexcaster::BloomMode::Tracking);
         pipeline.addStage(&noiseGate);
         pipeline.addStage(&inputGain);
         pipeline.addStage(&bloomPreGain);

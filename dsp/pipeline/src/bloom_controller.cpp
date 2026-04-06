@@ -275,7 +275,7 @@ void BloomController::setBasePostDb(float db)
 
 void BloomController::setDepth(float db)
 {
-    depth_.store(std::clamp(db, 0.f, 24.f), std::memory_order_relaxed);
+    depth_.store(std::clamp(db, 0.f, 32.f), std::memory_order_relaxed);
 }
 
 void BloomController::setCompensation(float ratio)
@@ -290,12 +290,12 @@ void BloomController::setAttackMs(float ms)
 
 void BloomController::setReleaseMs(float ms)
 {
-    releaseMs_.store(std::clamp(ms, 1.f, 5000.f), std::memory_order_relaxed);
+    releaseMs_.store(std::clamp(ms, 0.1f, 500.f), std::memory_order_relaxed);
 }
 
 void BloomController::setSensitivity(float db)
 {
-    sensitivity_.store(std::clamp(db, 0.f, 40.f), std::memory_order_relaxed);
+    sensitivity_.store(std::clamp(db, 0.f, 20.f), std::memory_order_relaxed);
 }
 
 void BloomController::setActivityThreshold(float t)

@@ -19,11 +19,11 @@ ParamRegistry::kParamInfo = []() {
     // Bloom
     info[idx(ParamId::BloomBasePre_dB)]  = { 0.f,  -24.f, 24.f };
     info[idx(ParamId::BloomBasePost_dB)] = { 0.f,  -24.f, 24.f };
-    info[idx(ParamId::BloomDepth_dB)]      = { 6.f,   0.f,  24.f };
+    info[idx(ParamId::BloomDepth_dB)]      = { 24.f,   0.f,  32.f };
     info[idx(ParamId::BloomCompensation)] = { 0.5f,  0.f,   2.f };
-    info[idx(ParamId::BloomAttackMs)]     = {  5.f,  0.1f, 500.f };
-    info[idx(ParamId::BloomReleaseMs)]    = {100.f,  1.f, 5000.f };
-    info[idx(ParamId::BloomSensitivity_dB)]     = { 20.f,  0.f,  40.f };
+    info[idx(ParamId::BloomAttackMs)]     = { 5.f,  0.1f, 500.f };
+    info[idx(ParamId::BloomReleaseMs)]    = { 5.f,  0.1f, 500.f };
+    info[idx(ParamId::BloomSensitivity_dB)]     = { 6.f,  0.f,  20.f };
     info[idx(ParamId::BloomActivityThreshold)]  = {0.01f, 0.0f,  1.0f };
 
     // Input Gain
@@ -37,7 +37,7 @@ ParamRegistry::kParamInfo = []() {
 
     // Mid-Sweep EQ
     info[idx(ParamId::EqGain_dB)]  = {    0.f, -12.f,  12.f };
-    info[idx(ParamId::EqSweepHz)]  = { 1000.f, 300.f, 2500.f };
+    info[idx(ParamId::EqSweepHz)]  = { 1000.f, 300.f, 4500.f };
     info[idx(ParamId::EqQ)]        = {    0.8f,  0.3f,   3.f };
 
     // Master Volume

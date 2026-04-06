@@ -146,13 +146,13 @@ private:
     // --- Atomic parameters (control thread writes, audio thread reads) ---
     std::atomic<float> basePreDb_    { 0.f   };
     std::atomic<float> basePostDb_   { 0.f   };
-    std::atomic<float> depth_        { 6.f   };
+    std::atomic<float> depth_        { 24.f   };
     std::atomic<float> compensation_ { 0.5f  };
     std::atomic<float> attackMs_     { 5.f   };
-    std::atomic<float> releaseMs_    { 100.f };
-    std::atomic<float>   sensitivity_         { 20.f  }; // dB
+    std::atomic<float> releaseMs_    { 5.f };
+    std::atomic<float>   sensitivity_         { 10.f  }; // dB
     std::atomic<float>   activityThreshold_  { 0.01f }; // Adaptive mode release gate [0,1]
-    std::atomic<uint8_t> mode_               { static_cast<uint8_t>(BloomMode::Shaped) };
+    std::atomic<uint8_t> mode_               { static_cast<uint8_t>(BloomMode::Tracking) };
 
     // --- Observation atomics (written by audio thread, read by TUI thread) ---
     // Updated once per block at the end of preProcess(). Relaxed ordering.
@@ -167,7 +167,7 @@ private:
     static constexpr float kDetectorAttackMs  =  0.1f;  // near-instantaneous peak capture
     static constexpr float kDetectorReleaseMs = 30.f;   // fast-ish release; bumped from 10ms
                                                          // to reduce per-cycle ripple on sustain
-    static constexpr float kDetectorSmoothMs  = 15.f;   // one-pole LPF on detector output
+    static constexpr float kDetectorSmoothMs  = 25.f;   // one-pole LPF on detector output
                                                          // removes residual ripple before
                                                          // feeding the gain envelope
     float detectorEnv_           = 0.f;
