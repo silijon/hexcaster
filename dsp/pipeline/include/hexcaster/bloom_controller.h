@@ -59,19 +59,6 @@ namespace hexcaster {
  *   - preProcess() is RT-safe: no allocation, no I/O, bounded time.
  *   - Atomic params read once per block, not per-sample.
  */
-/**
- * BloomMode selects how the gain envelope responds to the detector.
- *
- *   Shaped:   State-machine driven. Attack ramps toward detector on new note
- *             onset; release decays toward zero independently of the audio.
- *             Clean, predictable attack/release contours.
- *
- *   Tracking: Gain envelope smoothly follows the detector using the user's
- *             attack/release as a two-pole smoother. Gain tracks the audio
- *             dynamics rather than imposing an independent decay shape.
- */
-enum class BloomMode : uint8_t { Shaped = 0, Tracking = 1, Adaptive = 2 };
-
 class BloomController : public PipelineController {
 public:
     /**
@@ -105,12 +92,6 @@ public:
     void setSensitivity(float db);         // detection signal gain [0, 40] dB
     void setActivityThreshold(float t);   // Adaptive release gate [0, 1]
 
-    /** Set the bloom gain envelope mode. Thread-safe. */
-    void setMode(BloomMode m);
-
-    /** Read the current bloom mode. Thread-safe. */
-    BloomMode getMode() const;
-
     /**
      * Read the current gain envelope value [0.0, 1.0].
      * This is what drives the bloom pre/post gains. Its shape is governed
@@ -119,7 +100,7 @@ public:
      * Updated once per audio block at the end of preProcess().
      * Intended for TUI metering only -- do not use in the audio path.
      */
-    float getEnvelope() const;
+    float getGainEnvelope() const;
 
     /**
      * Read the current fast detector envelope value [0.0, 1.0].
@@ -129,6 +110,15 @@ public:
      * Updated once per audio block.
      */
     float getDetectorEnvelope() const;
+
+    /**
+     * Read the current fast detector peak value [0.0, 1.0].
+     * This tracks the raw audio amplitude with fixed short time constants.
+     * Useful for TUI visualization to see which value is driving the gain.
+     * Safe to call from any thread (relaxed atomic load).
+     * Updated once per audio block.
+     */
+    float getDetectorPeak() const;
 
     /**
      * Read the current harmonic activity level.
@@ -144,37 +134,44 @@ private:
     GainStage& postGain_;
 
     // --- Atomic parameters (control thread writes, audio thread reads) ---
-    std::atomic<float> basePreDb_    { 0.f   };
-    std::atomic<float> basePostDb_   { 0.f   };
-    std::atomic<float> depth_        { 24.f   };
-    std::atomic<float> compensation_ { 0.5f  };
-    std::atomic<float> attackMs_     { 5.f   };
-    std::atomic<float> releaseMs_    { 5.f };
+    std::atomic<float>   basePreDb_           { 0.f  };
+    std::atomic<float>   basePostDb_          { 0.f  };
+    std::atomic<float>   depth_               { 24.f };
+    std::atomic<float>   compensation_        { 0.5f };
+    std::atomic<float>   attackMs_            { 5.f  };
+    std::atomic<float>   releaseMs_           { 5.f  };
     std::atomic<float>   sensitivity_         { 10.f  }; // dB
-    std::atomic<float>   activityThreshold_  { 0.01f }; // Adaptive mode release gate [0,1]
-    std::atomic<uint8_t> mode_               { static_cast<uint8_t>(BloomMode::Tracking) };
+    std::atomic<float>   activityThreshold_   { 0.01f }; // Adaptive mode release gate [0,1]
 
     // --- Observation atomics (written by audio thread, read by TUI thread) ---
     // Updated once per block at the end of preProcess(). Relaxed ordering.
-    std::atomic<float> observedEnvelope_         { 0.f };  // gain envelope (drives bloom gains)
-    std::atomic<float> observedDetectorEnv_      { 0.f };  // fast detector (tracks audio)
+    std::atomic<float> observedDetectorEnvelope_ { 0.f };  // fast detector (tracks audio)
+    std::atomic<float> observedDetectorPeak_     { 0.f };  // last peak (tracks audio)
+    std::atomic<float> observedGainEnvelope_     { 0.f };  // gain envelope (drives bloom gains)
     std::atomic<float> observedHarmonicActivity_ { 0.f };  // harmonic activity metric
 
     // --- Audio thread state ---
     float sampleRate_ = 48000.f;
 
+    // -----------------------------------------------------------------------
     // Stage 1: fast peak detector (fixed time constants, not user-controlled)
-    static constexpr float kDetectorAttackMs  =  0.1f;  // near-instantaneous peak capture
-    static constexpr float kDetectorReleaseMs = 30.f;   // fast-ish release; bumped from 10ms
-                                                         // to reduce per-cycle ripple on sustain
-    static constexpr float kDetectorSmoothMs  = 25.f;   // one-pole LPF on detector output
-                                                         // removes residual ripple before
-                                                         // feeding the gain envelope
-    float detectorEnv_           = 0.f;
-    float smoothedDetEnv_        = 0.f;   // LPF-smoothed detector output
-    float detectorAttackCoeff_   = 0.f;   // computed once in prepare()
-    float detectorReleaseCoeff_  = 0.f;   // computed once in prepare()
-    float detectorSmoothCoeff_   = 0.f;   // computed once in prepare()
+    // -----------------------------------------------------------------------
+    static constexpr float kDetectorHpfHz        = 200.f;   // 1st-order high-pass, 200 Hz fixed
+    static constexpr float kDetectorAttackMs     =   0.1f;  // near-instantaneous peak capture
+    static constexpr float kDetectorReleaseMs    =  30.f;   // total release duration (ms)
+    static constexpr float kDetectorSmoothMs     =  25.f;   // one-pole LPF on detector output
+
+    float hpfX1_ = 0.f;                    // previous input sample
+    float hpfY1_ = 0.f;                    // previous output sample
+    float hpfA1_ = 0.f;                    // feedback coefficient
+    float hpfB0_ = 0.f;                    // feedforward coefficient
+    float hpfB1_ = 0.f;                    // feedforward coefficient (x[n-1])
+    float detectorAttackCoeff_   = 0.f;    // computed once in prepare()
+    float detectorReleaseCoeff_  = 0.f;    // computed once in prepare()
+    float detectorRawEnv_        = 0.f;    // current detector output (linear)
+    float detectorSmoothCoeff_   = 0.f;    // computed once in prepare()
+    float detectorSmoothEnv_     = 0.f;    // LPF-smoothed detector output
+    float detectorPeak_          = 0.f;    // peak value captured at release start
 
     // -----------------------------------------------------------------------
     // Harmonic activity metric (computed in all modes, used by Adaptive)
@@ -196,59 +193,31 @@ private:
     float prevSmoothedDet_       = 0.f;   // previous sample's smoothedDet (for delta)
     float activityCoeff_         = 0.f;   // computed once in prepare()
 
-    // Stage 2: gain envelope (user BloomAttackMs / BloomReleaseMs control this)
-    float gainEnv_           = 0.f;
-    float gainAttackCoeff_   = 0.f;   // recomputed when params change
-    float gainReleaseCoeff_  = 0.f;   // recomputed when params change
+
+    // -----------------------------------------------------------------------
+    // Stage 2: gain envelope (parabolic decay, user BloomAttackMs / BloomReleaseMs control this)
+    // Release uses an explicit parabolic decay: detEnv = peak * (1 - t/T)^n
+    // where t is samples elapsed since release start and T is the total
+    // release duration. This is guaranteed concave: zero slope at the peak
+    // (slow plateau), steepening toward zero. Unlike any exponential variant,
+    // this directly evaluates a concave function rather than trying to reshape
+    // a convex one.
+    // -----------------------------------------------------------------------
+    // TODO: maybe make this user-controlled 1-10?
+    static constexpr float kGainCompReleasePower =   3.f;  // curve exponent (>1 for concave, higher = longer plateau)
+
+    int   gainEnvAttackCoeff_    = 0.f;     // computed once in prepare()
+    float gainEnvReleaseDur_     = 0.1f;    // total release duration in samples (set in prepare)
+    float gainEnv_               = 0.f;     // realtime gain envelope value
+    int   gainEnvReleaseSample_  = 0;       // samples elapsed since release started
+    bool  gainEnvReleasing_      = false;   // true while in release phase
+
     float cachedAttackMs_    = -1.f;
     float cachedReleaseMs_   = -1.f;
 
-    // -----------------------------------------------------------------------
-    // Shaped mode: energy-ratio transient detector
-    //
-    // Compares short-term energy (fast follower, ~3ms) to long-term energy
-    // (slow follower, ~150ms). A note onset produces a large ratio (short
-    // jumps while long is still low); chord beating during sustain produces
-    // a ratio near 1.0 (both followers track similar levels).
-    //
-    // When the ratio exceeds kOnsetRatioThreshold, shapedDet is set to the
-    // current signal level. Otherwise shapedDet decays to zero at
-    // kShapedDetReleaseMs. The gain envelope state machine is driven by
-    // shapedDet, so it can release cleanly to zero without re-triggering
-    // on sustained audio or chord beating.
-    // -----------------------------------------------------------------------
-    static constexpr float kFastEnergyMs         =   3.f;  // short-term follower
-    static constexpr float kSlowEnergyMs         = 150.f;  // long-term follower
-    static constexpr float kOnsetRatioThreshold  =   2.5f; // fast/slow ratio for onset
-    static constexpr float kShapedDetReleaseMs   =  20.f;  // shapedDet decay to zero
-
-    // Per-sample delta threshold for detecting new notes over existing signal.
-    // A note onset rises at ~0.002/sample; chord beating at ~0.00001/sample.
-    // 0.001 gives a 100x margin above beating while catching moderate onsets.
-    static constexpr float kFastDeltaThreshold   = 0.001f;
-
-    float fastEnergy_            = 0.f;
-    float slowEnergy_            = 0.f;
-    float shapedDet_             = 0.f;
-    float fastEnergyCoeff_       = 0.f;   // computed once in prepare()
-    float slowEnergyCoeff_       = 0.f;   // computed once in prepare()
-    float shapedDetReleaseCoeff_ = 0.f;   // computed once in prepare()
-
-    // Shaped mode state machine
+    // gain envelope state machine
     enum class GainEnvState : uint8_t { Attack, Release };
     GainEnvState gainEnvState_ = GainEnvState::Release;
-
-    // Onset detection threshold for Shaped mode: shapedDet must exceed the
-    // gain envelope by this amount to trigger attack. Filters out noise.
-    static constexpr float kOnsetThreshold = 0.05f;
-
-    // Detector HPF state (1st-order high-pass, 100 Hz fixed)
-    static constexpr float kDetectorHpfHz = 100.f;
-    float hpfX1_ = 0.f;   // previous input sample
-    float hpfY1_ = 0.f;   // previous output sample
-    float hpfA1_ = 0.f;   // feedback coefficient
-    float hpfB0_ = 0.f;   // feedforward coefficient
-    float hpfB1_ = 0.f;   // feedforward coefficient (x[n-1])
 
     void updateCoefficients();
     void computeHpfCoefficients();

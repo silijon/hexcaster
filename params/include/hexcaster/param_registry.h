@@ -46,6 +46,12 @@ public:
     struct Range { float min; float max; };
     Range getRange(ParamId id) const;
 
+    /**
+     * Get the default value for a parameter.
+     * Static: does not depend on instance state.
+     */
+    static float getDefault(ParamId id);
+
 private:
     static constexpr int kNumParams = static_cast<int>(ParamId::kCount);
 

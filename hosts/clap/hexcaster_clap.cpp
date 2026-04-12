@@ -49,11 +49,12 @@
 static constexpr clap_id kModelReloadParamId  = 100;
 
 // Read-only meter param ids (CLAP-host-only, not in ParamRegistry)
-static constexpr clap_id kMeterBloomEnv      = 200;
+static constexpr clap_id kMeterGainEnv       = 200;
 static constexpr clap_id kMeterDetectorEnv   = 201;
-static constexpr clap_id kMeterActivity      = 202;
-static constexpr clap_id kMeterPreDb         = 203;
-static constexpr clap_id kMeterPostDb        = 204;
+static constexpr clap_id kMeterDetectorPeak  = 202;
+static constexpr clap_id kMeterActivity      = 203;
+static constexpr clap_id kMeterPreDb         = 204;
+static constexpr clap_id kMeterPostDb        = 205;
 
 // ---------------------------------------------------------------------------
 // Sidecar helpers (same as LV2 wrapper)
@@ -84,43 +85,51 @@ static std::string readSidecar()
 // Parameter table
 // ---------------------------------------------------------------------------
 
+// Registry-backed params (id < kModelReloadParamId) carry no inline numeric
+// ranges — min/max/default are read from ParamRegistry at runtime so there
+// is a single source of truth. Non-registry params (Model Reload, meters)
+// carry their own inline ranges via the extra fields below.
 struct ClapParamMeta {
     clap_id     id;
     const char* name;
-    const char* module;  // "/" separated path for grouping in host
+    const char* module;   // "/" separated path for grouping in host
+    bool        isStepped;
+    bool        isReadOnly;
+    // Used only when id >= kModelReloadParamId (non-registry params):
     double      minVal;
     double      maxVal;
     double      defaultVal;
-    bool        isStepped;
-    bool        isReadOnly;
 };
 
 static constexpr ClapParamMeta kParams[] = {
-    // id                                  name                     module         min     max     default  stepped  readOnly
-    { (clap_id)hexcaster::ParamId::NoiseGateThreshold_dB, "Gate Threshold",    "Noise Gate", -80.0,   0.0,  -60.0, false, false },
-    { (clap_id)hexcaster::ParamId::NoiseGateAttackMs,     "Gate Attack",       "Noise Gate",   0.1,  10.0,    0.5, false, false },
-    { (clap_id)hexcaster::ParamId::NoiseGateReleaseMs,    "Gate Release",      "Noise Gate",   5.0, 500.0,   50.0, false, false },
-    { (clap_id)hexcaster::ParamId::NoiseGateHoldMs,       "Gate Hold",         "Noise Gate",   0.0, 500.0,   50.0, false, false },
-    { (clap_id)hexcaster::ParamId::InputGain_dB,          "Input Gain",        "Input",      -60.0,  24.0,    0.0, false, false },
-    { (clap_id)hexcaster::ParamId::BloomBasePre_dB,       "Bloom Pre Gain",    "Bloom",      -24.0,  24.0,    0.0, false, false },
-    { (clap_id)hexcaster::ParamId::BloomBasePost_dB,      "Bloom Post Gain",   "Bloom",      -24.0,  24.0,    0.0, false, false },
-    { (clap_id)hexcaster::ParamId::BloomDepth_dB,         "Bloom Depth",       "Bloom",        0.0,  32.0,    24.0, false, false },
-    { (clap_id)hexcaster::ParamId::BloomCompensation,     "Bloom Compensation","Bloom",        0.0,   2.0,    0.5, false, false },
-    { (clap_id)hexcaster::ParamId::BloomAttackMs,         "Bloom Attack",      "Bloom",        0.1, 500.0,    5.0, false, false },
-    { (clap_id)hexcaster::ParamId::BloomReleaseMs,        "Bloom Release",     "Bloom",        0.1, 500.0,    5.0, false, false },
-    { (clap_id)hexcaster::ParamId::BloomSensitivity_dB,   "Bloom Sensitivity", "Bloom",        0.0,  20.0,   6.0, false, false },
-    { (clap_id)hexcaster::ParamId::BloomActivityThreshold,"Bloom Activity",    "Bloom",        0.0,   1.0,   0.01, false, false },
-    { (clap_id)hexcaster::ParamId::EqGain_dB,             "EQ Gain",           "EQ",          -12.0,  12.0,   0.0, false, false },
-    { (clap_id)hexcaster::ParamId::EqSweepHz,             "EQ Sweep",          "EQ",          300.0,2500.0,1000.0, false, false },
-    { (clap_id)hexcaster::ParamId::EqQ,                   "EQ Q",              "EQ",            0.3,   3.0,   0.8, false, false },
-    { (clap_id)hexcaster::ParamId::MasterVolume_dB,       "Master Volume",     "Output",      -60.0,  24.0,   0.0, false, false },
-    { kModelReloadParamId,                                 "Model Reload",      "Model",         0.0,   1.0,   0.0, true,  false },
-    // Read-only meters: updated via out_events each process() block
-    { kMeterBloomEnv,    "Bloom Envelope",    "Meters",  0.0,   1.0, 0.0, false, true },
-    { kMeterDetectorEnv, "Detector Envelope", "Meters",  0.0,   1.0, 0.0, false, true },
-    { kMeterActivity,    "Harmonic Activity", "Meters",  0.0,   1.0, 0.0, false, true },
-    { kMeterPreDb,       "Pre Gain Applied",  "Meters", -60.0, 32.0, 0.0, false, true },
-    { kMeterPostDb,      "Post Gain Applied", "Meters", -60.0, 32.0, 0.0, false, true },
+    // Registry-backed DSP params: numeric ranges come from ParamRegistry.
+    // id                                                    name                      module        stepped  readOnly  min    max    default
+    { (clap_id)hexcaster::ParamId::NoiseGateThreshold_dB, "Gate Threshold",    "Noise Gate", false, false,  0.0,  0.0, 0.0 },
+    { (clap_id)hexcaster::ParamId::NoiseGateAttackMs,     "Gate Attack",       "Noise Gate", false, false,  0.0,  0.0, 0.0 },
+    { (clap_id)hexcaster::ParamId::NoiseGateReleaseMs,    "Gate Release",      "Noise Gate", false, false,  0.0,  0.0, 0.0 },
+    { (clap_id)hexcaster::ParamId::NoiseGateHoldMs,       "Gate Hold",         "Noise Gate", false, false,  0.0,  0.0, 0.0 },
+    { (clap_id)hexcaster::ParamId::InputGain_dB,          "Input Gain",        "Input",      false, false,  0.0,  0.0, 0.0 },
+    { (clap_id)hexcaster::ParamId::BloomBasePre_dB,       "Bloom Pre Gain",    "Bloom",      false, false,  0.0,  0.0, 0.0 },
+    { (clap_id)hexcaster::ParamId::BloomBasePost_dB,      "Bloom Post Gain",   "Bloom",      false, false,  0.0,  0.0, 0.0 },
+    { (clap_id)hexcaster::ParamId::BloomDepth_dB,         "Bloom Depth",       "Bloom",      false, false,  0.0,  0.0, 0.0 },
+    { (clap_id)hexcaster::ParamId::BloomCompensation,     "Bloom Compensation","Bloom",      false, false,  0.0,  0.0, 0.0 },
+    { (clap_id)hexcaster::ParamId::BloomAttackMs,         "Bloom Attack",      "Bloom",      false, false,  0.0,  0.0, 0.0 },
+    { (clap_id)hexcaster::ParamId::BloomReleaseMs,        "Bloom Release",     "Bloom",      false, false,  0.0,  0.0, 0.0 },
+    { (clap_id)hexcaster::ParamId::BloomSensitivity_dB,   "Bloom Sensitivity", "Bloom",      false, false,  0.0,  0.0, 0.0 },
+    { (clap_id)hexcaster::ParamId::BloomActivityThreshold,"Bloom Activity",    "Bloom",      false, false,  0.0,  0.0, 0.0 },
+    { (clap_id)hexcaster::ParamId::EqGain_dB,             "EQ Gain",           "EQ",         false, false,  0.0,  0.0, 0.0 },
+    { (clap_id)hexcaster::ParamId::EqSweepHz,             "EQ Sweep",          "EQ",         false, false,  0.0,  0.0, 0.0 },
+    { (clap_id)hexcaster::ParamId::EqQ,                   "EQ Q",              "EQ",         false, false,  0.0,  0.0, 0.0 },
+    { (clap_id)hexcaster::ParamId::MasterVolume_dB,       "Master Volume",     "Output",     false, false,  0.0,  0.0, 0.0 },
+    // Non-registry params: inline ranges used directly.
+    { kModelReloadParamId, "Model Reload",      "Model",   true,  false, 0.0,  1.0, 0.0 },
+    // Read-only meters: updated via out_events each process() block.
+    { kMeterGainEnv,      "Gain Envelope",     "Meters",  false, true,  0.0,   1.0, 0.0 },
+    { kMeterDetectorEnv,  "Detector Envelope", "Meters",  false, true,  0.0,   1.0, 0.0 },
+    { kMeterDetectorPeak, "Detector Peak", "Meters",  false, true,  0.0,   1.0, 0.0 },
+    { kMeterActivity,     "Harmonic Activity", "Meters",  false, true,  0.0,   1.0, 0.0 },
+    { kMeterPreDb,        "Pre Gain Applied",  "Meters",  false, true, -60.0, 32.0, 0.0 },
+    { kMeterPostDb,       "Post Gain Applied", "Meters",  false, true, -60.0, 32.0, 0.0 },
 };
 static constexpr uint32_t kNumParams = sizeof(kParams) / sizeof(kParams[0]);
 
@@ -162,8 +171,9 @@ struct HexCasterCLAP {
     float prevReloadValue = 0.f;
 
     // Cached meter values — compared each block to avoid redundant out_events
-    float prevMeterEnv_      = 0.f;
+    float prevMeterGainEnv_  = 0.f;
     float prevMeterDetEnv_   = 0.f;
+    float prevMeterDetPeak_  = 0.f;
     float prevMeterActivity_ = 0.f;
     float prevMeterPreDb_    = 0.f;
     float prevMeterPostDb_   = 0.f;
@@ -173,7 +183,6 @@ struct HexCasterCLAP {
         , bloom(bloomPreGain, bloomPostGain)
     {
 
-        bloom.setMode(hexcaster::BloomMode::Tracking);
         pipeline.addStage(&noiseGate);
         pipeline.addStage(&inputGain);
         pipeline.addStage(&bloomPreGain);
@@ -330,11 +339,12 @@ static clap_process_status plugin_process(const clap_plugin_t*  plugin,
         proc->out_events->try_push(proc->out_events, &ev.header);
     };
 
-    pushMeter(kMeterBloomEnv,    self->prevMeterEnv_,      self->bloom.getEnvelope());
-    pushMeter(kMeterDetectorEnv, self->prevMeterDetEnv_,   self->bloom.getDetectorEnvelope());
-    pushMeter(kMeterActivity,    self->prevMeterActivity_,  self->bloom.getHarmonicActivity());
-    pushMeter(kMeterPreDb,       self->prevMeterPreDb_,    self->bloomPreGain.getGainDb());
-    pushMeter(kMeterPostDb,      self->prevMeterPostDb_,   self->bloomPostGain.getGainDb());
+    pushMeter(kMeterGainEnv,      self->prevMeterGainEnv_,  self->bloom.getGainEnvelope());
+    pushMeter(kMeterDetectorEnv,  self->prevMeterDetEnv_,   self->bloom.getDetectorEnvelope());
+    pushMeter(kMeterDetectorPeak, self->prevMeterDetPeak_,   self->bloom.getDetectorPeak());
+    pushMeter(kMeterActivity,     self->prevMeterActivity_, self->bloom.getHarmonicActivity());
+    pushMeter(kMeterPreDb,        self->prevMeterPreDb_,    self->bloomPreGain.getGainDb());
+    pushMeter(kMeterPostDb,       self->prevMeterPostDb_,   self->bloomPostGain.getGainDb());
 
     return CLAP_PROCESS_CONTINUE;
 }
@@ -382,23 +392,36 @@ static uint32_t params_count(const clap_plugin_t* /*plugin*/)
     return kNumParams;
 }
 
-static bool params_get_info(const clap_plugin_t* /*plugin*/,
+static bool params_get_info(const clap_plugin_t* plugin,
                               uint32_t               paramIndex,
                               clap_param_info_t*     info)
 {
     if (paramIndex >= kNumParams) return false;
     const ClapParamMeta& m = kParams[paramIndex];
 
-    info->id            = m.id;
-    info->flags         = m.isReadOnly ? CLAP_PARAM_IS_READONLY
-                                       : CLAP_PARAM_IS_AUTOMATABLE;
+    info->id     = m.id;
+    info->flags  = m.isReadOnly ? CLAP_PARAM_IS_READONLY
+                                : CLAP_PARAM_IS_AUTOMATABLE;
     if (m.isStepped) info->flags |= CLAP_PARAM_IS_STEPPED;
-    info->min_value     = m.minVal;
-    info->max_value     = m.maxVal;
-    info->default_value = m.defaultVal;
-    info->cookie        = nullptr;
+    info->cookie = nullptr;
     std::strncpy(info->name,   m.name,   sizeof(info->name));
     std::strncpy(info->module, m.module, sizeof(info->module));
+
+    if (m.id < kModelReloadParamId) {
+        // Registry-backed: read ranges from ParamRegistry (single source of truth).
+        const auto* self = static_cast<const HexCasterCLAP*>(plugin->plugin_data);
+        const auto  pid  = static_cast<hexcaster::ParamId>(m.id);
+        const auto  rng  = self->params.getRange(pid);
+        info->min_value     = static_cast<double>(rng.min);
+        info->max_value     = static_cast<double>(rng.max);
+        info->default_value = static_cast<double>(
+            hexcaster::ParamRegistry::getDefault(pid));
+    } else {
+        // Non-registry (Model Reload, meters): use inline values.
+        info->min_value     = m.minVal;
+        info->max_value     = m.maxVal;
+        info->default_value = m.defaultVal;
+    }
     return true;
 }
 
@@ -408,8 +431,9 @@ static bool params_get_value(const clap_plugin_t* plugin,
 {
     const auto* self = static_cast<const HexCasterCLAP*>(plugin->plugin_data);
     if (paramId == kModelReloadParamId) { *value = self->prevReloadValue;      return true; }
-    if (paramId == kMeterBloomEnv)      { *value = self->prevMeterEnv_;        return true; }
+    if (paramId == kMeterGainEnv)       { *value = self->prevMeterGainEnv_;    return true; }
     if (paramId == kMeterDetectorEnv)   { *value = self->prevMeterDetEnv_;     return true; }
+    if (paramId == kMeterDetectorPeak)  { *value = self->prevMeterDetPeak_;     return true; }
     if (paramId == kMeterActivity)      { *value = self->prevMeterActivity_;   return true; }
     if (paramId == kMeterPreDb)         { *value = self->prevMeterPreDb_;      return true; }
     if (paramId == kMeterPostDb)        { *value = self->prevMeterPostDb_;     return true; }

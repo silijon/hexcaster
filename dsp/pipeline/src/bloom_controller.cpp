@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 
 namespace hexcaster {
 
@@ -25,36 +26,38 @@ void BloomController::prepare(float sampleRate, int /*maxBlockSize*/)
     computeHpfCoefficients();
 
     // Compute fixed detector coefficients (not user-controlled)
-    detectorAttackCoeff_     = msToCoeff(kDetectorAttackMs,     sampleRate_);
-    detectorReleaseCoeff_    = msToCoeff(kDetectorReleaseMs,    sampleRate_);
-    detectorSmoothCoeff_     = msToCoeff(kDetectorSmoothMs,     sampleRate_);
-
-    // Shaped mode: energy comparator + transient decay
-    fastEnergyCoeff_         = msToCoeff(kFastEnergyMs,         sampleRate_);
-    slowEnergyCoeff_         = msToCoeff(kSlowEnergyMs,         sampleRate_);
-    shapedDetReleaseCoeff_   = msToCoeff(kShapedDetReleaseMs,   sampleRate_);
+    detectorAttackCoeff_   = msToCoeff(kDetectorAttackMs, sampleRate_);
+    detectorReleaseCoeff_  = msToCoeff(kDetectorReleaseMs, sampleRate_);
+    detectorSmoothCoeff_   = msToCoeff(kDetectorSmoothMs, sampleRate_);
 
     // Harmonic activity metric (all modes)
-    activityCoeff_           = msToCoeff(kActivityFollowerMs,    sampleRate_);
+    activityCoeff_         = msToCoeff(kActivityFollowerMs, sampleRate_);
 
-    cachedAttackMs_  = -1.f;  // force gain envelope coefficient recompute on first block
-    cachedReleaseMs_ = -1.f;
+    // Compute gain compensation envelope coefficients
+    // gainEnvAttackCoeff_    = msToCoeff(kGain, float sampleRate)
+    // gainEnvReleaseDur_     = static_cast<int>(kDetectorReleaseMs * 0.001f * sampleRate_);
+    // gainEnvReleaseDur_     = msToCoeff(k, sampleRate_); // TODO: change this to the above duration calc since it will be a time constant not coefficient
+    cachedAttackMs_        = -1.f;  // force gain envelope coefficient recompute on first block
+    cachedReleaseMs_       = -1.f;
+
     reset();
 }
 
 void BloomController::reset()
 {
-    detectorEnv_       = 0.f;
-    smoothedDetEnv_    = 0.f;
-    harmonicActivity_  = 0.f;
-    prevSmoothedDet_   = 0.f;
-    fastEnergy_        = 0.f;
-    slowEnergy_        = 0.f;
-    shapedDet_         = 0.f;
-    gainEnv_           = 0.f;
-    gainEnvState_      = GainEnvState::Release;
-    hpfX1_             = 0.f;
-    hpfY1_             = 0.f;
+    hpfX1_                 = 0.f;
+    hpfY1_                 = 0.f;
+    detectorRawEnv_        = 0.f;
+    detectorPeak_          = 0.f;
+    detectorSmoothEnv_     = 0.f;
+
+    prevSmoothedDet_       = 0.f;
+    harmonicActivity_      = 0.f;
+
+    gainEnvReleaseSample_  = 0;
+    gainEnvReleasing_      = false;
+    gainEnv_               = 0.f;
+    gainEnvState_          = GainEnvState::Release;
 }
 
 // ---------------------------------------------------------------------------
@@ -70,9 +73,7 @@ void BloomController::preProcess(const float* buffer, int numSamples)
     const float compensation = compensation_.load(std::memory_order_relaxed);
     const float attackMs          = attackMs_.load(std::memory_order_relaxed);
     const float releaseMs         = releaseMs_.load(std::memory_order_relaxed);
-    const float sensitivityLin    = std::pow(10.f,
-        sensitivity_.load(std::memory_order_relaxed) / 20.f);
-    const float activityThreshold = activityThreshold_.load(std::memory_order_relaxed);
+    const float sensitivityLin    = std::pow(10.f, sensitivity_.load(std::memory_order_relaxed) / 20.f);
 
     // Recompute EMA coefficients if attack/release changed
     if (attackMs != cachedAttackMs_ || releaseMs != cachedReleaseMs_) {
@@ -81,21 +82,21 @@ void BloomController::preProcess(const float* buffer, int numSamples)
         updateCoefficients();
     }
 
+    float detRawEnv      = detectorRawEnv_;
+    float detSmoothEnv   = detectorSmoothEnv_;
+    float detPeak        = detectorPeak_;
+
+    float harmAct        = harmonicActivity_;
+    float prevSD         = prevSmoothedDet_;
+
+    float gainEnv        = gainEnv_;
+    auto  gainEnvState   = gainEnvState_;
+    int   gainEnvRelSamp = gainEnvReleaseSample_;
+    bool  gainEnvRel     = gainEnvReleasing_;
+
     // Run detector HPF + envelope per-sample across the block.
     // The HPF is applied to the detection signal only -- the audio buffer
     // is const and is not modified.
-    const auto mode = static_cast<BloomMode>(mode_.load(std::memory_order_relaxed));
-
-    float detEnv      = detectorEnv_;
-    float smoothedDet = smoothedDetEnv_;
-    float harmAct     = harmonicActivity_;
-    float prevSD      = prevSmoothedDet_;
-    float fastE       = fastEnergy_;
-    float slowE       = slowEnergy_;
-    float sDet        = shapedDet_;
-    float gainEnv     = gainEnv_;
-    auto  gainEnvSt   = gainEnvState_;
-
     for (int i = 0; i < numSamples; ++i) {
         // ---------------------------------------------------------------
         // Stage 1a: detector HPF (sidechain only, not audio path)
@@ -106,129 +107,91 @@ void BloomController::preProcess(const float* buffer, int numSamples)
         hpfY1_ = hpfOut;
 
         // ---------------------------------------------------------------
-        // Stage 1b: fast peak detector
+        // Stage 1b: simple fast peak detector
         // ---------------------------------------------------------------
         const float absSample = (hpfOut < 0.f ? -hpfOut : hpfOut) * sensitivityLin;
-        if (absSample > detEnv)
-            detEnv = detectorAttackCoeff_  * detEnv + (1.f - detectorAttackCoeff_)  * absSample;
+        if (absSample > detRawEnv)
+            detRawEnv = detectorAttackCoeff_  * detRawEnv + (1.f - detectorAttackCoeff_)  * absSample;
         else
-            detEnv = detectorReleaseCoeff_ * detEnv + (1.f - detectorReleaseCoeff_) * absSample;
+            detRawEnv = detectorReleaseCoeff_ * detRawEnv + (1.f - detectorReleaseCoeff_) * absSample;
 
         // ---------------------------------------------------------------
-        // Stage 1c: smoothing LPF on detector output (15ms)
+        // Stage 1c: smoothing LPF on detector output
         // ---------------------------------------------------------------
-        smoothedDet = detectorSmoothCoeff_ * smoothedDet
-                    + (1.f - detectorSmoothCoeff_) * detEnv;
+        detSmoothEnv = detectorSmoothCoeff_ * detSmoothEnv + (1.f - detectorSmoothCoeff_) * detRawEnv;
 
         // ---------------------------------------------------------------
-        // Shared: delta + harmonic activity (computed in ALL modes)
+        // Stage 1d: harmonic activity calcuation (optional for visual out)
+        // ---------------------------------------------------------------
+        // Shared:   delta + harmonic activity (computed in ALL modes)
         //
         // delta:    per-sample rate of change of the smoothed detector.
         // harmAct:  running EMA of |delta|. High = complex harmonic content
         //           (chord beating). Low = clean single-note decay or silence.
         //
-        // Used by:  Shaped mode (delta for onset detection)
-        //           Adaptive mode (harmAct for release mode switching)
-        //           TUI (harmAct meter, all modes)
+        // Used by:  TUI (harmAct meter, all modes)
         // ---------------------------------------------------------------
-        const float delta    = smoothedDet - prevSD;
+        const float delta    = detSmoothEnv - prevSD;
         const float absDelta = (delta < 0.f) ? -delta : delta;
         // Square the delta before feeding the EMA to exaggerate the difference
         // between chord beating (large deltas) and single-note decay (small deltas).
         // Scale factor brings the resulting values into a [0, 1] display range.
         const float sq = absDelta * absDelta * kActivityScale;
         harmAct = activityCoeff_ * harmAct + (1.f - activityCoeff_) * sq;
-        prevSD  = smoothedDet;
+        prevSD  = detSmoothEnv;
 
         // ---------------------------------------------------------------
-        // Energy followers (Shaped mode uses for onset detection;
-        //                   updated in all modes to stay warm for switching)
+        // Stage 2: gain envelope derivation 
         // ---------------------------------------------------------------
-        fastE = fastEnergyCoeff_ * fastE + (1.f - fastEnergyCoeff_) * smoothedDet;
-        slowE = slowEnergyCoeff_ * slowE + (1.f - slowEnergyCoeff_) * smoothedDet;
+        // TODO: I think we can move the power calculation out of here
+        // TODO: Set peak on every sample, set gain on every buffer?
 
-        // ---------------------------------------------------------------
-        // Stage 2: gain envelope (mode-specific)
-        // ---------------------------------------------------------------
-        if (mode == BloomMode::Shaped) {
-            // Combined energy-ratio + delta onset detector.
-            // Energy ratio catches first-note-from-silence.
-            // Delta catches repeated notes over existing signal.
-            // Chord beating fails both (ratio ~1.0, delta small).
-            const float ratio = fastE / (slowE + 1e-10f);
-
-            const bool ratioOnset = (ratio > kOnsetRatioThreshold);
-            const bool deltaOnset = (delta > kFastDeltaThreshold);
-
-            if (ratioOnset || deltaOnset)
-                sDet = smoothedDet;
-            else
-                sDet = shapedDetReleaseCoeff_ * sDet;
-
-            // State-machine gain envelope driven by shapedDet.
-            if (gainEnvSt == GainEnvState::Release) {
-                gainEnv = gainReleaseCoeff_ * gainEnv;
-                if (sDet > gainEnv + kOnsetThreshold)
-                    gainEnvSt = GainEnvState::Attack;
-            }
-            if (gainEnvSt == GainEnvState::Attack) {
-                gainEnv = gainAttackCoeff_ * gainEnv + (1.f - gainAttackCoeff_) * sDet;
-                if (sDet < gainEnv)
-                    gainEnvSt = GainEnvState::Release;
-            }
-
-        } else if (mode == BloomMode::Adaptive) {
-            // Adaptive: defaults to Tracking behaviour (follow detector).
-            // When harmonic activity drops below threshold (simple content /
-            // single note), release disconnects from audio and freefalls
-            // at the user's release rate.
-            if (smoothedDet > gainEnv) {
-                // Attack: track detector upward at user attack rate
-                gainEnv = gainAttackCoeff_ * gainEnv + (1.f - gainAttackCoeff_) * smoothedDet;
-            } else if (harmAct > activityThreshold) {
-                // Rich harmonic content (chord): track audio down gently
-                gainEnv = gainReleaseCoeff_ * gainEnv + (1.f - gainReleaseCoeff_) * smoothedDet;
-            } else {
-                // Simple content (single note decay): freefall to zero
-                gainEnv = gainReleaseCoeff_ * gainEnv;
-            }
-
+        // find a new peak
+        const float epsilon = 0.0003f;
+        if (delta > epsilon) { // && detSmoothEnv > gainEnv) {
+            detPeak = detSmoothEnv;
+            gainEnv = detPeak;
         } else {
-            // Tracking: smoothly follow detector using user attack/release.
-            // Release targets smoothedDet (tracks audio), not zero.
-            if (smoothedDet > gainEnv)
-                gainEnv = gainAttackCoeff_ * gainEnv + (1.f - gainAttackCoeff_) * smoothedDet;
-            else
-                gainEnv = gainReleaseCoeff_ * gainEnv + (1.f - gainReleaseCoeff_) * smoothedDet;
+            // we want gainEnv as a function of the peak
+            // gainEnv = std::pow(detSmoothEnv, 1.f / gainEnvReleaseDur_);
+            // TODO : why is this gainPower calc not working?
+            // const float clampedPeak = std::clamp(detPeak, 0.1f, 1.f);
+            const float gainPower = 1.f / (4.6f * std::pow(detPeak, 2.2f)); // IMPORTANT coefficients (but adjust via sensitivity) 
+            gainEnv = std::pow(detSmoothEnv, gainPower);
+            // gainEnv = detPeak;
         }
+
+        // detRawEnv = detectorAttackCoeff_  * detRawEnv + (1.f - detectorAttackCoeff_)  * absSample;
     }
 
-    detectorEnv_       = detEnv;
-    smoothedDetEnv_    = smoothedDet;
-    harmonicActivity_  = harmAct;
-    prevSmoothedDet_   = prevSD;
-    fastEnergy_        = fastE;
-    slowEnergy_        = slowE;
-    shapedDet_         = sDet;
-    gainEnv_           = gainEnv;
-    gainEnvState_      = gainEnvSt;
+    detectorRawEnv_        = detRawEnv;
+    detectorPeak_          = detPeak;
+    detectorSmoothEnv_     = detSmoothEnv;
+    harmonicActivity_      = harmAct;
+    prevSmoothedDet_       = prevSD;
+    gainEnv_               = gainEnv;
+    gainEnvState_          = gainEnvState;
+    gainEnvReleaseSample_  = gainEnvRelSamp;
+    gainEnvReleasing_      = gainEnvRel;
 
     // Publish observations for TUI.
-    // Det Env: shapedDet in Shaped mode (transient pulses), smoothedDet otherwise.
+    // Det Env: smooth envelope is the operative detection envelope.
     // Gain Env: always the gain envelope.
     // Harmonic Activity: always published (visible on bloom screen in all modes).
-    const float detForTui = (mode == BloomMode::Shaped)
-                          ? std::clamp(sDet, 0.f, 1.f)
-                          : std::clamp(smoothedDet, 0.f, 1.f);
-    observedDetectorEnv_.store(detForTui, std::memory_order_relaxed);
-    observedEnvelope_.store(std::clamp(gainEnv, 0.f, 1.f), std::memory_order_relaxed);
+    const float detForTui = std::clamp(detSmoothEnv, 0.f, 1.f);
+    observedDetectorEnvelope_.store(detForTui, std::memory_order_relaxed);
+
+    const float peakForTui = std::clamp(detPeak, 0.f, 1.f);
+    observedDetectorPeak_.store(peakForTui, std::memory_order_relaxed);
+
+    observedGainEnvelope_.store(std::clamp(gainEnv, 0.f, 1.f), std::memory_order_relaxed);
     observedHarmonicActivity_.store(harmAct, std::memory_order_relaxed);
 
     // Clamp for the gain formulas (safety net -- gainEnv should already be [0,1]).
-    const float clampedEnv = std::clamp(gainEnv, 0.f, 1.f);
+    const float clampedGainEnv = std::clamp(gainEnv, 0.f, 1.f);
 
     // Compute gain targets from the envelope
-    const float reductionDb = depth * clampedEnv;
+    const float reductionDb = depth * clampedGainEnv;
     const float preGainDb   = basePreDb  - reductionDb;
     const float postGainDb  = basePostDb + compensation * reductionDb;
 
@@ -248,14 +211,19 @@ void BloomController::betweenStages(int /*stageIndex*/, float* /*buffer*/,
 // Parameter setters
 // ---------------------------------------------------------------------------
 
-float BloomController::getEnvelope() const
-{
-    return observedEnvelope_.load(std::memory_order_relaxed);
-}
-
 float BloomController::getDetectorEnvelope() const
 {
-    return observedDetectorEnv_.load(std::memory_order_relaxed);
+    return observedDetectorEnvelope_.load(std::memory_order_relaxed);
+}
+
+float BloomController::getDetectorPeak() const
+{
+    return observedDetectorPeak_.load(std::memory_order_relaxed);
+}
+
+float BloomController::getGainEnvelope() const
+{
+    return observedGainEnvelope_.load(std::memory_order_relaxed);
 }
 
 float BloomController::getHarmonicActivity() const
@@ -290,7 +258,7 @@ void BloomController::setAttackMs(float ms)
 
 void BloomController::setReleaseMs(float ms)
 {
-    releaseMs_.store(std::clamp(ms, 0.1f, 500.f), std::memory_order_relaxed);
+    releaseMs_.store(std::clamp(ms, 0.1f, 5.f), std::memory_order_relaxed);
 }
 
 void BloomController::setSensitivity(float db)
@@ -301,16 +269,6 @@ void BloomController::setSensitivity(float db)
 void BloomController::setActivityThreshold(float t)
 {
     activityThreshold_.store(std::clamp(t, 0.f, 1.f), std::memory_order_relaxed);
-}
-
-void BloomController::setMode(BloomMode m)
-{
-    mode_.store(static_cast<uint8_t>(m), std::memory_order_relaxed);
-}
-
-BloomMode BloomController::getMode() const
-{
-    return static_cast<BloomMode>(mode_.load(std::memory_order_relaxed));
 }
 
 // ---------------------------------------------------------------------------
@@ -327,8 +285,9 @@ void BloomController::updateCoefficients()
 {
     // Update gain envelope coefficients from user attack/release params.
     // Detector coefficients are fixed and set once in prepare().
-    gainAttackCoeff_  = msToCoeff(cachedAttackMs_,  sampleRate_);
-    gainReleaseCoeff_ = msToCoeff(cachedReleaseMs_, sampleRate_);
+    gainEnvAttackCoeff_  = msToCoeff(cachedAttackMs_, sampleRate_);
+    gainEnvReleaseDur_ = cachedReleaseMs_;
+    //gainEnvReleaseDur_ = msToCoeff(cachedReleaseMs_, sampleRate_);
 }
 
 // Detector HPF: 1st-order high-pass filter.

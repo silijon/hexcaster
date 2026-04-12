@@ -19,11 +19,11 @@ ParamRegistry::kParamInfo = []() {
     // Bloom
     info[idx(ParamId::BloomBasePre_dB)]  = { 0.f,  -24.f, 24.f };
     info[idx(ParamId::BloomBasePost_dB)] = { 0.f,  -24.f, 24.f };
-    info[idx(ParamId::BloomDepth_dB)]      = { 24.f,   0.f,  32.f };
-    info[idx(ParamId::BloomCompensation)] = { 0.5f,  0.f,   2.f };
-    info[idx(ParamId::BloomAttackMs)]     = { 5.f,  0.1f, 500.f };
-    info[idx(ParamId::BloomReleaseMs)]    = { 5.f,  0.1f, 500.f };
-    info[idx(ParamId::BloomSensitivity_dB)]     = { 6.f,  0.f,  20.f };
+    info[idx(ParamId::BloomDepth_dB)]      = { 32.f,   0.f,  32.f };
+    info[idx(ParamId::BloomCompensation)] = { 0.55f,  0.f,   2.f };
+    info[idx(ParamId::BloomAttackMs)]     = { 25.f,  0.1f, 500.f };
+    info[idx(ParamId::BloomReleaseMs)]    = { 2.f,  0.1f, 5.f };
+    info[idx(ParamId::BloomSensitivity_dB)]     = { 6.25f,  0.f,  20.f };
     info[idx(ParamId::BloomActivityThreshold)]  = {0.01f, 0.0f,  1.0f };
 
     // Input Gain
@@ -73,6 +73,13 @@ void ParamRegistry::resetToDefaults()
     for (int i = 0; i < kNumParams; ++i) {
         values_[i].store(kParamInfo[i].defaultValue, std::memory_order_relaxed);
     }
+}
+
+float ParamRegistry::getDefault(ParamId id)
+{
+    const int i = static_cast<int>(id);
+    if (i < 0 || i >= kNumParams) return 0.f;
+    return kParamInfo[i].defaultValue;
 }
 
 ParamRegistry::Range ParamRegistry::getRange(ParamId id) const
