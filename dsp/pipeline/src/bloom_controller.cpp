@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <iterator>
 
 namespace hexcaster {
 
@@ -143,25 +142,12 @@ void BloomController::preProcess(const float* buffer, int numSamples)
         // ---------------------------------------------------------------
         // Stage 2: gain envelope derivation 
         // ---------------------------------------------------------------
-        // TODO: I think we can move the power calculation out of here
-        // TODO: Set peak on every sample, set gain on every buffer?
-
         // find a new peak
-        const float epsilon = 0.0003f;
-        if (delta > epsilon) { // && detSmoothEnv > gainEnv) {
+        // TODO: this needs to be related to sensitivty -- as sensitivity goes down
+        //       the difference between subsequent samples is reduced
+        const float epsilon = 0.0003f;  
+        if (delta > epsilon)
             detPeak = detSmoothEnv;
-            gainEnv = detPeak;
-        } else {
-            // we want gainEnv as a function of the peak
-            // gainEnv = std::pow(detSmoothEnv, 1.f / gainEnvReleaseDur_);
-            // TODO : why is this gainPower calc not working?
-            // const float clampedPeak = std::clamp(detPeak, 0.1f, 1.f);
-            const float gainPower = 1.f / (4.6f * std::pow(detPeak, 2.2f)); // IMPORTANT coefficients (but adjust via sensitivity) 
-            gainEnv = std::pow(detSmoothEnv, gainPower);
-            // gainEnv = detPeak;
-        }
-
-        // detRawEnv = detectorAttackCoeff_  * detRawEnv + (1.f - detectorAttackCoeff_)  * absSample;
     }
 
     detectorRawEnv_        = detRawEnv;
@@ -173,6 +159,11 @@ void BloomController::preProcess(const float* buffer, int numSamples)
     gainEnvState_          = gainEnvState;
     gainEnvReleaseSample_  = gainEnvRelSamp;
     gainEnvReleasing_      = gainEnvRel;
+
+    // Compute the gain envelope
+    // TODO: this coefficient computation can be cached
+    const float gainCoefficient = std::pow(2.f, gainEnvReleaseDur_);
+    gainEnv = std::pow(detSmoothEnv, 1.f / (gainCoefficient * std::pow(detPeak, gainEnvReleaseDur_)));
 
     // Publish observations for TUI.
     // Det Env: smooth envelope is the operative detection envelope.
@@ -193,9 +184,8 @@ void BloomController::preProcess(const float* buffer, int numSamples)
     // Compute gain targets from the envelope
     const float reductionDb = depth * clampedGainEnv;
     const float preGainDb   = basePreDb  - reductionDb;
+    // TODO: can we automate compensation?
     const float postGainDb  = basePostDb + compensation * reductionDb;
-
-    // Set the gain stages. Their internal smoothers will interpolate
     // per-sample from the previous target to this new target.
     preGain_.setGainDb(preGainDb);
     postGain_.setGainDb(postGainDb);
@@ -258,7 +248,7 @@ void BloomController::setAttackMs(float ms)
 
 void BloomController::setReleaseMs(float ms)
 {
-    releaseMs_.store(std::clamp(ms, 0.1f, 5.f), std::memory_order_relaxed);
+    releaseMs_.store(std::clamp(ms, 0.5f, 10.f), std::memory_order_relaxed);
 }
 
 void BloomController::setSensitivity(float db)

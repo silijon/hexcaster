@@ -22,7 +22,7 @@ ParamRegistry::kParamInfo = []() {
     info[idx(ParamId::BloomDepth_dB)]      = { 32.f,   0.f,  32.f };
     info[idx(ParamId::BloomCompensation)] = { 0.55f,  0.f,   2.f };
     info[idx(ParamId::BloomAttackMs)]     = { 25.f,  0.1f, 500.f };
-    info[idx(ParamId::BloomReleaseMs)]    = { 2.f,  0.1f, 5.f };
+    info[idx(ParamId::BloomReleaseMs)]    = { 3.f,  0.5f, 10.f };
     info[idx(ParamId::BloomSensitivity_dB)]     = { 6.25f,  0.f,  20.f };
     info[idx(ParamId::BloomActivityThreshold)]  = {0.01f, 0.0f,  1.0f };
 
