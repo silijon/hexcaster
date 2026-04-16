@@ -48,6 +48,18 @@
 
 static constexpr clap_id kModelReloadParamId  = 100;
 
+#if HEXCASTER_DEBUG_CHANNELS
+// Debug output channel indices (channel 0 = processed audio, always present).
+static constexpr uint32_t kDbgChDetectorRaw    = 1;  // raw detector (pre-smoothing)   [0,1]
+static constexpr uint32_t kDbgChDetectorEnv    = 2;  // smoothed detector envelope     [0,1]
+static constexpr uint32_t kDbgChDetectorPeak   = 3;  // detector peak                  [0,1]
+static constexpr uint32_t kDbgChGainEnv        = 4;  // gain envelope                  [0,1]
+static constexpr uint32_t kDbgChActivity       = 5;  // harmonic activity              [0,1]
+static constexpr uint32_t kDbgChPreDbNorm      = 6;  // bloom pre gain / 32  → [-1,1]
+static constexpr uint32_t kDbgChPostDbNorm     = 7;  // bloom post gain / 32 → [-1,1]
+static constexpr uint32_t kDbgChannelCount     = 8;
+#endif
+
 // Read-only meter param ids (CLAP-host-only, not in ParamRegistry)
 static constexpr clap_id kMeterGainEnv       = 200;
 static constexpr clap_id kMeterDetectorEnv   = 201;
@@ -322,6 +334,23 @@ static clap_process_status plugin_process(const clap_plugin_t*  plugin,
     std::memcpy(out, in, nframes * sizeof(float));
     self->pipeline.process(out, static_cast<int>(nframes));
 
+#if HEXCASTER_DEBUG_CHANNELS
+    // Fill debug channels with current per-block observation values (staircase).
+    auto fillChannel = [&](uint32_t ch, float value) {
+        if (ch >= proc->audio_outputs[0].channel_count) return;
+        float* buf = proc->audio_outputs[0].data32[ch];
+        if (!buf) return;
+        for (uint32_t i = 0; i < nframes; ++i) buf[i] = value;
+    };
+    fillChannel(kDbgChDetectorRaw,  self->bloom.getDetectorRawEnvelope());
+    fillChannel(kDbgChDetectorEnv,  self->bloom.getDetectorEnvelope());
+    fillChannel(kDbgChDetectorPeak, self->bloom.getDetectorPeak());
+    fillChannel(kDbgChGainEnv,      self->bloom.getGainEnvelope());
+    // fillChannel(kDbgChActivity,     self->bloom.getHarmonicActivity());
+    // fillChannel(kDbgChPreDbNorm,    self->bloomPreGain.getGainDb()  / 32.f);
+    // fillChannel(kDbgChPostDbNorm,   self->bloomPostGain.getGainDb() / 32.f);
+#endif
+
     // Push read-only meter params to out_events so Reaper's UI sliders update.
     // Only send events when the value has changed meaningfully.
     auto pushMeter = [&](clap_id id, float& prev, float cur) {
@@ -365,16 +394,32 @@ static uint32_t audio_ports_count(const clap_plugin_t* /*plugin*/, bool /*isInpu
 
 static bool audio_ports_get(const clap_plugin_t* /*plugin*/,
                               uint32_t             index,
-                              bool                 /*isInput*/,
+                              bool                 isInput,
                               clap_audio_port_info_t* info)
 {
     if (index != 0) return false;
     info->id            = 0;
+    info->in_place_pair = CLAP_INVALID_ID;
+
+#if HEXCASTER_DEBUG_CHANNELS
+    if (isInput) {
+        info->channel_count = 1;
+        info->flags         = CLAP_AUDIO_PORT_IS_MAIN;
+        info->port_type     = CLAP_PORT_MONO;
+        std::strncpy(info->name, "Audio In", sizeof(info->name));
+    } else {
+        info->channel_count = kDbgChannelCount;
+        info->flags         = CLAP_AUDIO_PORT_IS_MAIN;
+        info->port_type     = nullptr;  // arbitrary channel count
+        std::strncpy(info->name, "Audio + Debug", sizeof(info->name));
+    }
+#else
+    (void)isInput;
     info->channel_count = 1;
     info->flags         = CLAP_AUDIO_PORT_IS_MAIN;
     info->port_type     = CLAP_PORT_MONO;
-    info->in_place_pair = CLAP_INVALID_ID;
     std::strncpy(info->name, "Audio", sizeof(info->name));
+#endif
     return true;
 }
 

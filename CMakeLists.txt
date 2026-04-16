@@ -29,6 +29,7 @@ option(HEXCASTER_BUILD_CLAP       "Build CLAP plugin"          ON)
 option(HEXCASTER_BUILD_STANDALONE "Build standalone runtime"   ON)
 option(HEXCASTER_BUILD_TESTS      "Build tests"                ON)
 option(HEXCASTER_BUILD_TUI        "Build TUI for standalone"   ON)
+option(HEXCASTER_DEBUG_CHANNELS   "CLAP: expose internal DSP signals on extra output channels" OFF)
 
 # External dependencies
 include(cmake/dependencies.cmake)

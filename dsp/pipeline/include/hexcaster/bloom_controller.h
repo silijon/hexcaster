@@ -112,6 +112,15 @@ public:
     float getDetectorEnvelope() const;
 
     /**
+     * Read the current raw (pre-smoothing) detector envelope value [0.0, 1.0].
+     * This is the output of the fast peak detector before the LPF smoothing
+     * stage. Useful for comparing against the smoothed detector envelope.
+     * Safe to call from any thread (relaxed atomic load).
+     * Updated once per audio block.
+     */
+    float getDetectorRawEnvelope() const;
+
+    /**
      * Read the current fast detector peak value [0.0, 1.0].
      * This tracks the raw audio amplitude with fixed short time constants.
      * Useful for TUI visualization to see which value is driving the gain.
@@ -145,6 +154,7 @@ private:
 
     // --- Observation atomics (written by audio thread, read by TUI thread) ---
     // Updated once per block at the end of preProcess(). Relaxed ordering.
+    std::atomic<float> observedDetectorRawEnvelope_ { 0.f };  // raw detector (pre-smoothing)
     std::atomic<float> observedDetectorEnvelope_ { 0.f };  // fast detector (tracks audio)
     std::atomic<float> observedDetectorPeak_     { 0.f };  // last peak (tracks audio)
     std::atomic<float> observedGainEnvelope_     { 0.f };  // gain envelope (drives bloom gains)

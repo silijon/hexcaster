@@ -19,9 +19,12 @@ target_include_directories(hexcaster_clap
 
 target_link_libraries(hexcaster_clap
   PRIVATE
-    hexcaster_pipeline
-    hexcaster_params
+    hexcaster_pipeline   # brings in hexcaster_components and hexcaster_params transitively
 )
+
+if(HEXCASTER_DEBUG_CHANNELS)
+  target_compile_definitions(hexcaster_clap PRIVATE HEXCASTER_DEBUG_CHANNELS=1)
+endif()
 
 # ---------------------------------------------------------------------------
 # macOS: assemble the .clap bundle directory and auto-install

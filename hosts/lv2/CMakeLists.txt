@@ -41,8 +41,7 @@ target_include_directories(hexcaster_lv2
 
 target_link_libraries(hexcaster_lv2
   PRIVATE
-    hexcaster_pipeline
-    hexcaster_params
+    hexcaster_pipeline   # brings in hexcaster_components and hexcaster_params transitively
 )
 
 # Bundle destination: ~/.lv2/hexcaster.lv2/

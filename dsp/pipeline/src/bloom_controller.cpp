@@ -172,6 +172,9 @@ void BloomController::preProcess(const float* buffer, int numSamples)
     const float detForTui = std::clamp(detSmoothEnv, 0.f, 1.f);
     observedDetectorEnvelope_.store(detForTui, std::memory_order_relaxed);
 
+    const float detRawForTui = std::clamp(detRawEnv, 0.f, 1.f);
+    observedDetectorRawEnvelope_.store(detRawForTui, std::memory_order_relaxed);
+
     const float peakForTui = std::clamp(detPeak, 0.f, 1.f);
     observedDetectorPeak_.store(peakForTui, std::memory_order_relaxed);
 
@@ -204,6 +207,11 @@ void BloomController::betweenStages(int /*stageIndex*/, float* /*buffer*/,
 float BloomController::getDetectorEnvelope() const
 {
     return observedDetectorEnvelope_.load(std::memory_order_relaxed);
+}
+
+float BloomController::getDetectorRawEnvelope() const
+{
+    return observedDetectorRawEnvelope_.load(std::memory_order_relaxed);
 }
 
 float BloomController::getDetectorPeak() const
