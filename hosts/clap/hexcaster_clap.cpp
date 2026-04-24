@@ -49,15 +49,15 @@
 static constexpr clap_id kModelReloadParamId  = 100;
 
 #if HEXCASTER_DEBUG_CHANNELS
-// Debug output channel indices (channel 0 = processed audio, always present).
-static constexpr uint32_t kDbgChDetectorRaw    = 1;  // raw detector (pre-smoothing)   [0,1]
-static constexpr uint32_t kDbgChDetectorEnv    = 2;  // smoothed detector envelope     [0,1]
-static constexpr uint32_t kDbgChDetectorPeak   = 3;  // detector peak                  [0,1]
-static constexpr uint32_t kDbgChGainEnv        = 4;  // gain envelope                  [0,1]
-static constexpr uint32_t kDbgChActivity       = 5;  // harmonic activity              [0,1]
-static constexpr uint32_t kDbgChPreDbNorm      = 6;  // bloom pre gain / 32  → [-1,1]
-static constexpr uint32_t kDbgChPostDbNorm     = 7;  // bloom post gain / 32 → [-1,1]
-static constexpr uint32_t kDbgChannelCount     = 8;
+// Debug output channel indices (channel 0-1 = processed audio, always present).
+static constexpr uint32_t kDbgChDetectorRaw    = 2;  // raw detector (pre-smoothing)   [0,1]
+static constexpr uint32_t kDbgChDetectorEnv    = 3;  // smoothed detector envelope     [0,1]
+static constexpr uint32_t kDbgChDetectorPeak   = 4;  // detector peak                  [0,1]
+static constexpr uint32_t kDbgChGainEnv        = 5;  // gain envelope                  [0,1]
+static constexpr uint32_t kDbgChActivity       = 6;  // harmonic activity              [0,1]
+static constexpr uint32_t kDbgChPreDbNorm      = 7;  // bloom pre gain / 32  → [-1,1]
+static constexpr uint32_t kDbgChPostDbNorm     = 8;  // bloom post gain / 32 → [-1,1]
+static constexpr uint32_t kDbgChannelCount     = 9;
 #endif
 
 // Read-only meter param ids (CLAP-host-only, not in ParamRegistry)

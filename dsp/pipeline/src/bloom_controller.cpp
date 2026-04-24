@@ -87,6 +87,7 @@ void BloomController::preProcess(const float* buffer, int numSamples)
 
     float harmAct        = harmonicActivity_;
     float prevSD         = prevSmoothedDet_;
+    float smoothDelta    = smoothedDelta_;
 
     float gainEnv        = gainEnv_;
     auto  gainEnvState   = gainEnvState_;
@@ -130,24 +131,27 @@ void BloomController::preProcess(const float* buffer, int numSamples)
         //
         // Used by:  TUI (harmAct meter, all modes)
         // ---------------------------------------------------------------
-        const float delta    = detSmoothEnv - prevSD;
-        const float absDelta = (delta < 0.f) ? -delta : delta;
+        const float rawDelta    = detSmoothEnv - prevSD;
+
         // Square the delta before feeding the EMA to exaggerate the difference
         // between chord beating (large deltas) and single-note decay (small deltas).
         // Scale factor brings the resulting values into a [0, 1] display range.
-        const float sq = absDelta * absDelta * kActivityScale;
+        const float sq = rawDelta * rawDelta * kActivityScale;
         harmAct = activityCoeff_ * harmAct + (1.f - activityCoeff_) * sq;
-        prevSD  = detSmoothEnv;
 
         // ---------------------------------------------------------------
         // Stage 2: gain envelope derivation 
         // ---------------------------------------------------------------
         // find a new peak
-        // TODO: this needs to be related to sensitivty -- as sensitivity goes down
-        //       the difference between subsequent samples is reduced
-        const float epsilon = 0.0003f;  
-        if (delta > epsilon)
+        // TODO: it might need a safety to return to zero
+        const float alpha = 0.005f; // how much we are considering the rawDelta component 
+        const float epsilon = 0.00005f; // 0.0003f; // peak detection threshold
+        smoothDelta += alpha * (rawDelta - smoothDelta);
+        if (smoothDelta > epsilon)
             detPeak = detSmoothEnv;
+
+        // x-buffer carry-overs
+        prevSD  = detSmoothEnv;
     }
 
     detectorRawEnv_        = detRawEnv;
@@ -155,6 +159,7 @@ void BloomController::preProcess(const float* buffer, int numSamples)
     detectorSmoothEnv_     = detSmoothEnv;
     harmonicActivity_      = harmAct;
     prevSmoothedDet_       = prevSD;
+    smoothedDelta_         = smoothDelta;
     gainEnv_               = gainEnv;
     gainEnvState_          = gainEnvState;
     gainEnvReleaseSample_  = gainEnvRelSamp;
@@ -162,6 +167,8 @@ void BloomController::preProcess(const float* buffer, int numSamples)
 
     // Compute the gain envelope
     // TODO: this coefficient computation can be cached
+    // if peak < 0.5, gain releases faster than detEnv, else gain releases slower than detEnv on exp curve
+    // TODO: need to condition this on fn(peak, smoothdelta@peak)
     const float gainCoefficient = std::pow(2.f, gainEnvReleaseDur_);
     gainEnv = std::pow(detSmoothEnv, 1.f / (gainCoefficient * std::pow(detPeak, gainEnvReleaseDur_)));
 
@@ -169,20 +176,20 @@ void BloomController::preProcess(const float* buffer, int numSamples)
     // Det Env: smooth envelope is the operative detection envelope.
     // Gain Env: always the gain envelope.
     // Harmonic Activity: always published (visible on bloom screen in all modes).
-    const float detForTui = std::clamp(detSmoothEnv, 0.f, 1.f);
-    observedDetectorEnvelope_.store(detForTui, std::memory_order_relaxed);
-
     const float detRawForTui = std::clamp(detRawEnv, 0.f, 1.f);
     observedDetectorRawEnvelope_.store(detRawForTui, std::memory_order_relaxed);
+
+    const float detForTui = std::clamp(detSmoothEnv, 0.f, 1.f);
+    observedDetectorEnvelope_.store(detForTui, std::memory_order_relaxed);
 
     const float peakForTui = std::clamp(detPeak, 0.f, 1.f);
     observedDetectorPeak_.store(peakForTui, std::memory_order_relaxed);
 
-    observedGainEnvelope_.store(std::clamp(gainEnv, 0.f, 1.f), std::memory_order_relaxed);
-    observedHarmonicActivity_.store(harmAct, std::memory_order_relaxed);
-
     // Clamp for the gain formulas (safety net -- gainEnv should already be [0,1]).
     const float clampedGainEnv = std::clamp(gainEnv, 0.f, 1.f);
+    observedGainEnvelope_.store(clampedGainEnv, std::memory_order_relaxed);
+
+    observedHarmonicActivity_.store(harmAct, std::memory_order_relaxed);
 
     // Compute gain targets from the envelope
     const float reductionDb = depth * clampedGainEnv;

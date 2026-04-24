@@ -169,7 +169,7 @@ private:
     static constexpr float kDetectorHpfHz        = 200.f;   // 1st-order high-pass, 200 Hz fixed
     static constexpr float kDetectorAttackMs     =   0.1f;  // near-instantaneous peak capture
     static constexpr float kDetectorReleaseMs    =  30.f;   // total release duration (ms)
-    static constexpr float kDetectorSmoothMs     =  25.f;   // one-pole LPF on detector output
+    static constexpr float kDetectorSmoothMs     =  70.f;   // one-pole LPF on detector output
 
     float hpfX1_ = 0.f;                    // previous input sample
     float hpfY1_ = 0.f;                    // previous output sample
@@ -202,6 +202,7 @@ private:
     float harmonicActivity_      = 0.f;
     float prevSmoothedDet_       = 0.f;   // previous sample's smoothedDet (for delta)
     float activityCoeff_         = 0.f;   // computed once in prepare()
+    float smoothedDelta_         = 0.f;   // change in sample amplitude (for delta)
 
 
     // -----------------------------------------------------------------------
