@@ -130,6 +130,15 @@ public:
     float getDetectorPeak() const;
 
     /**
+     * Read the current fast detector slope value [0.0, 1.0].
+     * This tracks the onset and decay rate of the transient.
+     * Useful for TUI visualization to see which value is driving the gain.
+     * Safe to call from any thread (relaxed atomic load).
+     * Updated once per audio block.
+     */
+    float getDetectorSlope() const;
+
+    /**
      * Read the current harmonic activity level.
      * EMA of |delta(smoothedDet)|. High = complex harmonic content (chords).
      * Low = simple content or silence (single notes, quiet).
@@ -171,6 +180,7 @@ private:
     static constexpr float kDetectorAttackMs     =   0.1f;  // near-instantaneous peak capture
     static constexpr float kDetectorReleaseMs    =  30.f;   // total release duration (ms)
     static constexpr float kDetectorSmoothMs     =  70.f;   // one-pole LPF on detector output
+    static constexpr int   kDetectorHoldoffSamples =  512;  // how many samples to holdoff before calling ADSR phase change 
 
     float hpfX1_ = 0.f;                    // previous input sample
     float hpfY1_ = 0.f;                    // previous output sample
@@ -185,6 +195,9 @@ private:
     float prevSmoothedDet_       = 0.f;    // previous sample's smoothedDet (for delta)
     float detectorPeak_          = 0.f;    // peak value captured at release start
     float detectorSlope_         = 0.f;    // change in sample amplitude (for delta)
+    float detectorMaxSlope_   = 0.f;    // max slope achieved by a note on the rising edge (for delta)
+    bool  detectorUnderAttack_   = false;   // state tracking for the attack phase of transient                                           
+    int   detectorHoldoffCounter_ = kDetectorHoldoffSamples;
 
     // -----------------------------------------------------------------------
     // Harmonic activity metric (computed in all modes, used by Adaptive)

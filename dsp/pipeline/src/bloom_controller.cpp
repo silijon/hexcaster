@@ -81,12 +81,15 @@ void BloomController::preProcess(const float* buffer, int numSamples)
         updateCoefficients();
     }
 
-    float detRawEnv      = detectorRawEnv_;
-    float detSmoothEnv   = detectorSmoothEnv_;
-    float detPeak        = detectorPeak_;
+    float detRawEnv        = detectorRawEnv_;
+    float detSmoothEnv     = detectorSmoothEnv_;
+    float detPeak          = detectorPeak_;
+    float detSlope         = detectorSlope_;
+    float detMaxSlope      = detectorMaxSlope_;
+    bool  detUnderAttack   = detectorUnderAttack_;
+    int   detHoldoffCounter = detectorHoldoffCounter_;
 
     float harmAct        = harmonicActivity_;
-    float smoothDelta    = detectorSlope_;
 
     float gainEnv        = gainEnv_;
     auto  gainEnvState   = gainEnvState_;
@@ -131,33 +134,66 @@ void BloomController::preProcess(const float* buffer, int numSamples)
         //
         // Used by:  TUI (harmAct meter, all modes)
         // ---------------------------------------------------------------
-        const float rawDelta    = detSmoothEnv - prevSD;
+        const float delta    = detSmoothEnv - prevSD;
 
         // Square the delta before feeding the EMA to exaggerate the difference
         // between chord beating (large deltas) and single-note decay (small deltas).
         // Scale factor brings the resulting values into a [0, 1] display range.
-        const float sq = rawDelta * rawDelta * kActivityScale;
+        const float sq = delta * delta * kActivityScale;
         harmAct = activityCoeff_ * harmAct + (1.f - activityCoeff_) * sq;
 
         // ---------------------------------------------------------------
-        // Stage 2: gain envelope derivation 
+        // Stage 1e: peak and slope detection 
         // ---------------------------------------------------------------
         // find a new peak
-        const float alpha = 0.005f; // how much we are considering the rawDelta component 
-        const float epsilon = 0.00005f; // 0.0003f; // peak detection threshold
-        smoothDelta += alpha * (rawDelta - smoothDelta);
-        if (smoothDelta > epsilon)
-            detPeak = detSmoothEnv;
+        const float alpha = 0.005f; // how much we are considering the delta component in slope derivation 
+        const float epsilon = 0.00005f; // min slope difference to discover new peak 
+        detSlope += alpha * (delta - detSlope);  // calculate a smoothed slope from the raw delta
+        
+        // calculate the peak and the max slope for the current transient
+        if (detSlope > epsilon) { // new peak
+            detHoldoffCounter = kDetectorHoldoffSamples;
+            if (!detUnderAttack) {
+                // this is the start of a new transient
+                detUnderAttack = true;
+                detMaxSlope = detSlope;  // reset
+                detPeak = detSmoothEnv;  // reset
+            }
+            if (detSmoothEnv > detPeak) { // peak is rising
+                detPeak = detSmoothEnv;
+                detMaxSlope = std::max(detSlope, detMaxSlope);
+            }
+        } else {
+            if (detUnderAttack) {
+                // keep tracking peak and slope during holdoff
+                if (detSmoothEnv > detPeak) {
+                    detPeak = detSmoothEnv;
+                    detMaxSlope = std::max(detSlope, detMaxSlope);
+                }
+                if (--detHoldoffCounter <= 0) {
+                    // attack phase ended
+                    // detPeak and detMaxSlope are finalized for this transient
+                    // hold them until the next transient
+                    detUnderAttack = false;
+                }
+            }
+        }
+            
     }
 
     detectorRawEnv_        = detRawEnv;
-    detectorPeak_          = detPeak;
     detectorSmoothEnv_     = detSmoothEnv;
-    detectorSlope_         = smoothDelta;
+    detectorPeak_          = detPeak;
+    detectorSlope_         = detSlope;
+    detectorMaxSlope_      = detMaxSlope;
+    detectorUnderAttack_   = detUnderAttack;
+    detectorHoldoffCounter_ = detHoldoffCounter;
+
     gainEnv_               = gainEnv;
     gainEnvState_          = gainEnvState;
     gainEnvReleaseSample_  = gainEnvRelSamp;
     gainEnvReleasing_      = gainEnvRel;
+
     harmonicActivity_      = harmAct;
 
     // Compute the gain envelope
@@ -168,18 +204,21 @@ void BloomController::preProcess(const float* buffer, int numSamples)
     gainEnv = std::pow(detSmoothEnv, 1.f / (gainCoefficient * std::pow(detPeak, gainEnvReleaseDur_)));
     // TODO: smooth gain envelope
 
-    // Publish observations for TUI.
+    // Publish observations for visual output.
     // Det Env: smooth envelope is the operative detection envelope.
     // Gain Env: always the gain envelope.
     // Harmonic Activity: always published (visible on bloom screen in all modes).
-    const float detRawForTui = std::clamp(detRawEnv, 0.f, 1.f);
-    observedDetectorRawEnvelope_.store(detRawForTui, std::memory_order_relaxed);
+    const float detRawForViz = std::clamp(detRawEnv, 0.f, 1.f);
+    observedDetectorRawEnvelope_.store(detRawForViz, std::memory_order_relaxed);
 
-    const float detForTui = std::clamp(detSmoothEnv, 0.f, 1.f);
-    observedDetectorEnvelope_.store(detForTui, std::memory_order_relaxed);
+    const float detForViz = std::clamp(detSmoothEnv, 0.f, 1.f);
+    observedDetectorEnvelope_.store(detForViz, std::memory_order_relaxed);
 
-    const float peakForTui = std::clamp(detPeak, 0.f, 1.f);
-    observedDetectorPeak_.store(peakForTui, std::memory_order_relaxed);
+    const float peakForViz = std::clamp(detPeak, 0.f, 1.f);
+    observedDetectorPeak_.store(peakForViz, std::memory_order_relaxed);
+
+    const float slopeForViz = std::clamp(detMaxSlope * 1000, -1.f, 1.f);
+    observedDetectorSlope_.store(slopeForViz, std::memory_order_relaxed);
 
     // Clamp for the gain formulas (safety net -- gainEnv should already be [0,1]).
     const float clampedGainEnv = std::clamp(gainEnv, 0.f, 1.f);
@@ -220,6 +259,11 @@ float BloomController::getDetectorRawEnvelope() const
 float BloomController::getDetectorPeak() const
 {
     return observedDetectorPeak_.load(std::memory_order_relaxed);
+}
+
+float BloomController::getDetectorSlope() const
+{
+    return observedDetectorSlope_.load(std::memory_order_relaxed);
 }
 
 float BloomController::getGainEnvelope() const
