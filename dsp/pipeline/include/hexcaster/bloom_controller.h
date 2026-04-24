@@ -149,7 +149,7 @@ private:
     std::atomic<float>   compensation_        { 0.5f };
     std::atomic<float>   attackMs_            { 5.f  };
     std::atomic<float>   releaseMs_           { 5.f  };
-    std::atomic<float>   sensitivity_         { 10.f  }; // dB
+    std::atomic<float>   sensitivity_         { 5.f  }; // dB
     std::atomic<float>   activityThreshold_   { 0.01f }; // Adaptive mode release gate [0,1]
 
     // --- Observation atomics (written by audio thread, read by TUI thread) ---

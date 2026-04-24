@@ -19,15 +19,15 @@ ParamRegistry::kParamInfo = []() {
     // Bloom
     info[idx(ParamId::BloomBasePre_dB)]  = { 0.f,  -24.f, 24.f };
     info[idx(ParamId::BloomBasePost_dB)] = { 0.f,  -24.f, 24.f };
-    info[idx(ParamId::BloomDepth_dB)]      = { 32.f,   0.f,  32.f };
-    info[idx(ParamId::BloomCompensation)] = { 0.55f,  0.f,   2.f };
+    info[idx(ParamId::BloomDepth_dB)]      = { 20.f,   0.f,  32.f };
+    info[idx(ParamId::BloomCompensation)] = { 0.33f,  0.f,   2.f };
     info[idx(ParamId::BloomAttackMs)]     = { 25.f,  0.1f, 500.f };
     info[idx(ParamId::BloomReleaseMs)]    = { 3.f,  0.5f, 10.f };
-    info[idx(ParamId::BloomSensitivity_dB)]     = { 6.25f,  0.f,  20.f };
+    info[idx(ParamId::BloomSensitivity_dB)]     = { 5.f,  0.f,  20.f };
     info[idx(ParamId::BloomActivityThreshold)]  = {0.01f, 0.0f,  1.0f };
 
     // Input Gain
-    info[idx(ParamId::InputGain_dB)]     = {   0.f, -60.f,   24.f };
+    info[idx(ParamId::InputGain_dB)]     = {   -10.f, -60.f,   24.f };
 
     // Noise Gate
     info[idx(ParamId::NoiseGateThreshold_dB)] = { -60.f, -80.f,   0.f };
