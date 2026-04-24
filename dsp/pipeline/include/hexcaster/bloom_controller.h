@@ -155,10 +155,11 @@ private:
     // --- Observation atomics (written by audio thread, read by TUI thread) ---
     // Updated once per block at the end of preProcess(). Relaxed ordering.
     std::atomic<float> observedDetectorRawEnvelope_ { 0.f };  // raw detector (pre-smoothing)
-    std::atomic<float> observedDetectorEnvelope_ { 0.f };  // fast detector (tracks audio)
-    std::atomic<float> observedDetectorPeak_     { 0.f };  // last peak (tracks audio)
-    std::atomic<float> observedGainEnvelope_     { 0.f };  // gain envelope (drives bloom gains)
-    std::atomic<float> observedHarmonicActivity_ { 0.f };  // harmonic activity metric
+    std::atomic<float> observedDetectorEnvelope_    { 0.f };  // fast detector (tracks audio)
+    std::atomic<float> observedDetectorSlope_       { 0.f };  // last delta (tracks audio)
+    std::atomic<float> observedDetectorPeak_        { 0.f };  // last peak (tracks audio)
+    std::atomic<float> observedGainEnvelope_        { 0.f };  // gain envelope (drives bloom gains)
+    std::atomic<float> observedHarmonicActivity_    { 0.f };  // harmonic activity metric
 
     // --- Audio thread state ---
     float sampleRate_ = 48000.f;
@@ -181,7 +182,9 @@ private:
     float detectorRawEnv_        = 0.f;    // current detector output (linear)
     float detectorSmoothCoeff_   = 0.f;    // computed once in prepare()
     float detectorSmoothEnv_     = 0.f;    // LPF-smoothed detector output
+    float prevSmoothedDet_       = 0.f;    // previous sample's smoothedDet (for delta)
     float detectorPeak_          = 0.f;    // peak value captured at release start
+    float detectorSlope_         = 0.f;    // change in sample amplitude (for delta)
 
     // -----------------------------------------------------------------------
     // Harmonic activity metric (computed in all modes, used by Adaptive)
@@ -200,10 +203,7 @@ private:
     // absDelta for single notes is ~1e-6, squared ~1e-12, * 1e9 => ~0.001.
     static constexpr float kActivityScale      = 1e9f;    // scale squared delta
     float harmonicActivity_      = 0.f;
-    float prevSmoothedDet_       = 0.f;   // previous sample's smoothedDet (for delta)
     float activityCoeff_         = 0.f;   // computed once in prepare()
-    float smoothedDelta_         = 0.f;   // change in sample amplitude (for delta)
-
 
     // -----------------------------------------------------------------------
     // Stage 2: gain envelope (parabolic decay, user BloomAttackMs / BloomReleaseMs control this)

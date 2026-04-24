@@ -86,8 +86,7 @@ void BloomController::preProcess(const float* buffer, int numSamples)
     float detPeak        = detectorPeak_;
 
     float harmAct        = harmonicActivity_;
-    float prevSD         = prevSmoothedDet_;
-    float smoothDelta    = smoothedDelta_;
+    float smoothDelta    = detectorSlope_;
 
     float gainEnv        = gainEnv_;
     auto  gainEnvState   = gainEnvState_;
@@ -118,6 +117,7 @@ void BloomController::preProcess(const float* buffer, int numSamples)
         // ---------------------------------------------------------------
         // Stage 1c: smoothing LPF on detector output
         // ---------------------------------------------------------------
+        const float prevSD = detSmoothEnv;
         detSmoothEnv = detectorSmoothCoeff_ * detSmoothEnv + (1.f - detectorSmoothCoeff_) * detRawEnv;
 
         // ---------------------------------------------------------------
@@ -143,27 +143,22 @@ void BloomController::preProcess(const float* buffer, int numSamples)
         // Stage 2: gain envelope derivation 
         // ---------------------------------------------------------------
         // find a new peak
-        // TODO: it might need a safety to return to zero
         const float alpha = 0.005f; // how much we are considering the rawDelta component 
         const float epsilon = 0.00005f; // 0.0003f; // peak detection threshold
         smoothDelta += alpha * (rawDelta - smoothDelta);
         if (smoothDelta > epsilon)
             detPeak = detSmoothEnv;
-
-        // x-buffer carry-overs
-        prevSD  = detSmoothEnv;
     }
 
     detectorRawEnv_        = detRawEnv;
     detectorPeak_          = detPeak;
     detectorSmoothEnv_     = detSmoothEnv;
-    harmonicActivity_      = harmAct;
-    prevSmoothedDet_       = prevSD;
-    smoothedDelta_         = smoothDelta;
+    detectorSlope_         = smoothDelta;
     gainEnv_               = gainEnv;
     gainEnvState_          = gainEnvState;
     gainEnvReleaseSample_  = gainEnvRelSamp;
     gainEnvReleasing_      = gainEnvRel;
+    harmonicActivity_      = harmAct;
 
     // Compute the gain envelope
     // TODO: this coefficient computation can be cached
@@ -171,6 +166,7 @@ void BloomController::preProcess(const float* buffer, int numSamples)
     // TODO: need to condition this on fn(peak, smoothdelta@peak)
     const float gainCoefficient = std::pow(2.f, gainEnvReleaseDur_);
     gainEnv = std::pow(detSmoothEnv, 1.f / (gainCoefficient * std::pow(detPeak, gainEnvReleaseDur_)));
+    // TODO: smooth gain envelope
 
     // Publish observations for TUI.
     // Det Env: smooth envelope is the operative detection envelope.
