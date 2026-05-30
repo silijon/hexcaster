@@ -245,6 +245,14 @@ void BloomController::preProcess(const float* buffer, int numSamples)
     const float chordScoreFloored = std::max(chordScoreSmoothed, kChordFloor);
     gainEnv = std::pow(detSmoothEnv, 1.f / (gainCoefficient * std::pow(chordScoreFloored, gainEnvReleaseDur_)));
 
+    // Tracking: smoothly follow detector using user attack/release.
+    // Release targets smoothedDet (tracks audio), not zero.
+    // TODO: need to figure out how to access simple envelope following mode from amp
+    // if (detSmoothEnv > gainEnv)
+    //     gainEnv = gainEnvAttackCoeff_ * gainEnv + (1.f - gainEnvAttackCoeff_) * detSmoothEnv;
+    // else
+    //     gainEnv = gainEnvReleaseCoeff_ * gainEnv + (1.f - gainEnvReleaseCoeff_) * detSmoothEnv;
+
     // Publish observations for visual output.
     // Det Env: smooth envelope is the operative detection envelope.
     // Gain Env: always the gain envelope.
