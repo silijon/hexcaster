@@ -139,6 +139,14 @@ public:
     float getDetectorSlope() const;
 
     /**
+     * Read the current chord score [0, 1].
+     * Combined peak + max-slope feature with adaptive weighting based on
+     * inter-transient time. Drives the gain envelope decay rate. Updated
+     * once per audio block. Safe to call from any thread.
+     */
+    float getChordScore() const;
+
+    /**
      * Read the current harmonic activity level.
      * EMA of |delta(smoothedDet)|. High = complex harmonic content (chords).
      * Low = simple content or silence (single notes, quiet).
@@ -169,6 +177,7 @@ private:
     std::atomic<float> observedDetectorPeak_        { 0.f };  // last peak (tracks audio)
     std::atomic<float> observedGainEnvelope_        { 0.f };  // gain envelope (drives bloom gains)
     std::atomic<float> observedHarmonicActivity_    { 0.f };  // harmonic activity metric
+    std::atomic<float> observedChordScore_          { 0.f };  // combined peak+slope chord score
 
     // --- Audio thread state ---
     float sampleRate_ = 48000.f;
@@ -196,8 +205,30 @@ private:
     float detectorPeak_          = 0.f;    // peak value captured at release start
     float detectorSlope_         = 0.f;    // change in sample amplitude (for delta)
     float detectorMaxSlope_   = 0.f;    // max slope achieved by a note on the rising edge (for delta)
-    bool  detectorUnderAttack_   = false;   // state tracking for the attack phase of transient                                           
+    bool  detectorUnderAttack_   = false;   // state tracking for the attack phase of transient
     int   detectorHoldoffCounter_ = kDetectorHoldoffSamples;
+
+    // -----------------------------------------------------------------------
+    // Combined peak + slope chord score (drives gain decay rate)
+    //
+    // Adaptive weighting between detPeak and detMaxSlope based on the
+    // interval since the previous transient. Long intervals → trust slope
+    // (dynamics-invariant). Short intervals → trust peak (slope is
+    // suppressed when notes pile up). Result is rescaled by kPeakRef so
+    // chord-typical values land near the existing 0.5 pivot of the gain
+    // formula.
+    // -----------------------------------------------------------------------
+    static constexpr float kPeakRef            = 0.6f;     // chord-typical peak (matches existing gain formula pivot)
+    static constexpr float kSlopeRef           = 0.0004f;   // chord-typical detMaxSlope (tune from debug captures)
+    static constexpr float kFastNoteMs         = 500.f;    // below this, weight toward peak
+    static constexpr float kChordFloor         = 0.05f;    // min chord score (prevents pow() blow-up)
+    static constexpr float kChordScoreSmoothMs = 10.f;     // EMA on chord score target
+
+    int   samplesSinceLastTransient_ = 0;     // counter, incremented every sample, reset at onset
+    int   lastTransientInterval_     = 0;     // captured interval at each onset (for adaptive weighting)
+    float chordScoreTarget_          = 0.f;   // chord score computed at end-of-attack, held until next
+    float chordScoreSmoothed_        = 0.f;   // per-sample EMA of target, used by gain formula
+    float chordScoreSmoothCoeff_     = 0.f;   // computed once in prepare()
 
     // -----------------------------------------------------------------------
     // Harmonic activity metric (computed in all modes, used by Adaptive)

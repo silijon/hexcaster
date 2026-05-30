@@ -32,6 +32,9 @@ void BloomController::prepare(float sampleRate, int /*maxBlockSize*/)
     // Harmonic activity metric (all modes)
     activityCoeff_         = msToCoeff(kActivityFollowerMs, sampleRate_);
 
+    // Chord score smoothing
+    chordScoreSmoothCoeff_ = msToCoeff(kChordScoreSmoothMs, sampleRate_);
+
     // Compute gain compensation envelope coefficients
     // gainEnvAttackCoeff_    = msToCoeff(kGain, float sampleRate)
     // gainEnvReleaseDur_     = static_cast<int>(kDetectorReleaseMs * 0.001f * sampleRate_);
@@ -57,6 +60,13 @@ void BloomController::reset()
     gainEnvReleasing_      = false;
     gainEnv_               = 0.f;
     gainEnvState_          = GainEnvState::Release;
+
+    // Chord score: pretend the last transient was a long time ago so the
+    // first detected transient is treated as isolated (full slope weight).
+    samplesSinceLastTransient_ = static_cast<int>(sampleRate_);  // ~1s
+    lastTransientInterval_     = static_cast<int>(sampleRate_);
+    chordScoreTarget_          = 0.f;
+    chordScoreSmoothed_        = 0.f;
 }
 
 // ---------------------------------------------------------------------------
@@ -88,6 +98,12 @@ void BloomController::preProcess(const float* buffer, int numSamples)
     float detMaxSlope      = detectorMaxSlope_;
     bool  detUnderAttack   = detectorUnderAttack_;
     int   detHoldoffCounter = detectorHoldoffCounter_;
+
+    int   samplesSinceLastTrans = samplesSinceLastTransient_;
+    int   lastTransInterval     = lastTransientInterval_;
+    float chordScoreTarget      = chordScoreTarget_;
+    float chordScoreSmoothed    = chordScoreSmoothed_;
+    const float fastNoteSamples = kFastNoteMs * 0.001f * sampleRate_;
 
     float harmAct        = harmonicActivity_;
 
@@ -158,6 +174,9 @@ void BloomController::preProcess(const float* buffer, int numSamples)
                 detUnderAttack = true;
                 detMaxSlope = detSlope;  // reset
                 detPeak = detSmoothEnv;  // reset
+                // capture the gap before this onset for adaptive weighting
+                lastTransInterval = samplesSinceLastTrans;
+                samplesSinceLastTrans = 0;
             }
             if (detSmoothEnv > detPeak) { // peak is rising
                 detPeak = detSmoothEnv;
@@ -175,10 +194,27 @@ void BloomController::preProcess(const float* buffer, int numSamples)
                     // detPeak and detMaxSlope are finalized for this transient
                     // hold them until the next transient
                     detUnderAttack = false;
+                    // Compute chord score target now that peak + maxSlope
+                    // are finalized. Adaptive blend: long interval since
+                    // previous onset → trust slope; short interval → trust
+                    // peak. Trailing * kPeakRef rescales so chord-typical
+                    // values land near the existing 0.5 gain pivot.
+                    const float speedFactor = std::min(
+                        static_cast<float>(lastTransInterval) / fastNoteSamples, 1.f);
+                    const float slopeWeight = speedFactor;
+                    const float peakWeight  = 1.f - speedFactor;
+                    const float peakNorm    = std::min(detPeak     / kPeakRef,  1.f);
+                    const float slopeNorm   = std::min(detMaxSlope / kSlopeRef, 1.f);
+                    chordScoreTarget = (peakWeight * peakNorm + slopeWeight * slopeNorm) * kPeakRef;
                 }
             }
         }
-            
+
+        // Smooth the held chord score target every sample so step changes
+        // at end-of-attack don't pump the gain envelope audibly.
+        chordScoreSmoothed = chordScoreSmoothCoeff_ * chordScoreSmoothed
+                           + (1.f - chordScoreSmoothCoeff_) * chordScoreTarget;
+        ++samplesSinceLastTrans;
     }
 
     detectorRawEnv_        = detRawEnv;
@@ -188,6 +224,11 @@ void BloomController::preProcess(const float* buffer, int numSamples)
     detectorMaxSlope_      = detMaxSlope;
     detectorUnderAttack_   = detUnderAttack;
     detectorHoldoffCounter_ = detHoldoffCounter;
+
+    samplesSinceLastTransient_ = samplesSinceLastTrans;
+    lastTransientInterval_     = lastTransInterval;
+    chordScoreTarget_          = chordScoreTarget;
+    chordScoreSmoothed_        = chordScoreSmoothed;
 
     gainEnv_               = gainEnv;
     gainEnvState_          = gainEnvState;
@@ -201,8 +242,8 @@ void BloomController::preProcess(const float* buffer, int numSamples)
     // if peak < 0.5, gain releases faster than detEnv, else gain releases slower than detEnv on exp curve
     // TODO: need to condition this on fn(peak, smoothdelta@peak)
     const float gainCoefficient = std::pow(2.f, gainEnvReleaseDur_);
-    gainEnv = std::pow(detSmoothEnv, 1.f / (gainCoefficient * std::pow(detPeak, gainEnvReleaseDur_)));
-    // TODO: smooth gain envelope
+    const float chordScoreFloored = std::max(chordScoreSmoothed, kChordFloor);
+    gainEnv = std::pow(detSmoothEnv, 1.f / (gainCoefficient * std::pow(chordScoreFloored, gainEnvReleaseDur_)));
 
     // Publish observations for visual output.
     // Det Env: smooth envelope is the operative detection envelope.
@@ -225,6 +266,9 @@ void BloomController::preProcess(const float* buffer, int numSamples)
     observedGainEnvelope_.store(clampedGainEnv, std::memory_order_relaxed);
 
     observedHarmonicActivity_.store(harmAct, std::memory_order_relaxed);
+
+    const float chordScoreForViz = std::clamp(chordScoreSmoothed, 0.f, 1.f);
+    observedChordScore_.store(chordScoreForViz, std::memory_order_relaxed);
 
     // Compute gain targets from the envelope
     const float reductionDb = depth * clampedGainEnv;
@@ -274,6 +318,11 @@ float BloomController::getGainEnvelope() const
 float BloomController::getHarmonicActivity() const
 {
     return observedHarmonicActivity_.load(std::memory_order_relaxed);
+}
+
+float BloomController::getChordScore() const
+{
+    return observedChordScore_.load(std::memory_order_relaxed);
 }
 
 void BloomController::setBasePreDb(float db)

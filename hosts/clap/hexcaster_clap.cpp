@@ -53,12 +53,13 @@ static constexpr clap_id kModelReloadParamId  = 100;
 static constexpr uint32_t kDbgChDetectorRaw    = 2;  // raw detector (pre-smoothing)   [0,1]
 static constexpr uint32_t kDbgChDetectorEnv    = 3;  // smoothed detector envelope     [0,1]
 static constexpr uint32_t kDbgChDetectorPeak   = 4;  // detector peak                  [0,1]
-static constexpr uint32_t kDbgChDetectorSlope  = 5;  // detector slope                 [0,1]
+static constexpr uint32_t kDbgChDetectorSlope  = 5;  // detector slope                 [-1,1]
 static constexpr uint32_t kDbgChGainEnv        = 6;  // gain envelope                  [0,1]
-static constexpr uint32_t kDbgChActivity       = 7;  // harmonic activity              [0,1]
-static constexpr uint32_t kDbgChPreDbNorm      = 8;  // bloom pre gain / 32  → [-1,1]
-static constexpr uint32_t kDbgChPostDbNorm     = 9;  // bloom post gain / 32 → [-1,1]
-static constexpr uint32_t kDbgChannelCount     = 10;
+static constexpr uint32_t kDbgChChordScore     = 7;  // chord score (drives gain decay) [0,1]
+static constexpr uint32_t kDbgChActivity       = 8;  // harmonic activity              [0,1]
+static constexpr uint32_t kDbgChPreDbNorm      = 9;  // bloom pre gain / 32  → [-1,1]
+static constexpr uint32_t kDbgChPostDbNorm     = 10; // bloom post gain / 32 → [-1,1]
+static constexpr uint32_t kDbgChannelCount     = 11;
 #endif
 
 // Read-only meter param ids (CLAP-host-only, not in ParamRegistry)
@@ -351,6 +352,7 @@ static clap_process_status plugin_process(const clap_plugin_t*  plugin,
     fillChannel(kDbgChDetectorPeak,  self->bloom.getDetectorPeak());
     fillChannel(kDbgChDetectorSlope, self->bloom.getDetectorSlope());
     fillChannel(kDbgChGainEnv,       self->bloom.getGainEnvelope());
+    fillChannel(kDbgChChordScore,    self->bloom.getChordScore());
     // fillChannel(kDbgChActivity,     self->bloom.getHarmonicActivity());
     // fillChannel(kDbgChPreDbNorm,    self->bloomPreGain.getGainDb()  / 32.f);
     // fillChannel(kDbgChPostDbNorm,   self->bloomPostGain.getGainDb() / 32.f);
