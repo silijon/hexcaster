@@ -59,8 +59,8 @@ struct Args {
     unsigned int bufferFrames   = 128;
     float        gainDb                = 0.f;
     float        gateThresholdDb      = -60.f;
-    float        eqGainDb             = 0.f;
-    float        eqSweepHz            = 1000.f;
+    float        eqHighShelfGainDb    = -16.2f;
+    float        eqLowShelfGainDb     = 4.0f;
     float        masterVolumeDb       = 0.f;
     float        bloomDepth           = 6.f;
     float        bloomCompensation    = 0.5f;
@@ -86,8 +86,8 @@ static void printUsage(const char* prog)
         "  --buffer <frames>           Buffer size in frames  [default: 128]\n"
         "  --gain <dB>                 Initial input gain in dB  [default: 0.0]\n"
         "  --gate-threshold <dB>       Noise gate threshold  [-80, 0] dB  [default: -60]\n"
-        "  --eq-gain <dB>              Post-NAM EQ gain  [-12, +12] dB  [default: 0]\n"
-        "  --eq-sweep <Hz>             Post-NAM EQ center frequency  [300, 2500] Hz  [default: 1000]\n"
+        "  --high-shelf-gain <dB>      High-shelf EQ gain  [-32, +12] dB  [default: -16.2]\n"
+        "  --low-shelf-gain <dB>       Low-shelf EQ gain  [-32, +12] dB  [default: 4.0]\n"
         "  --master-volume <dB>        Final output level to power amp  [-60, +24] dB  [default: 0]\n"
         "  --bloom-depth <dB>          Bloom max input gain reduction  [0, 24] dB  [default: 6]\n"
         "  --bloom-compensation <r>    Bloom output compensation ratio  [0, 2]  [default: 0.5]\n"
@@ -104,7 +104,8 @@ static void printUsage(const char* prog)
         "  BloomDepth_dB  BloomCompensation  BloomSensitivity_dB  BloomAttackMs  BloomReleaseMs\n"
         "  BloomActivityThreshold\n"
         "  NoiseGateThreshold_dB  NoiseGateAttackMs  NoiseGateReleaseMs  NoiseGateHoldMs\n"
-        "  EqGain_dB  EqSweepHz  EqQ  MasterVolume_dB\n"
+        "  HighShelfHz  HighShelfGain_dB  HighShelfBw\n"
+        "  LowShelfHz  LowShelfGain_dB  LowShelfBw  MasterVolume_dB\n"
         "\n"
         "Examples:\n"
         "  %s --model ~/amp.nam --input-device hw:CARD=V276,DEV=0 \\\n"
@@ -194,12 +195,12 @@ static bool parseArgs(int argc, char** argv, Args& args)
         } else if (std::strcmp(key, "--gate-threshold") == 0) {
             const char* v = nextArg(); if (!v) return false;
             args.gateThresholdDb = static_cast<float>(std::atof(v));
-        } else if (std::strcmp(key, "--eq-gain") == 0) {
+        } else if (std::strcmp(key, "--high-shelf-gain") == 0) {
             const char* v = nextArg(); if (!v) return false;
-            args.eqGainDb = static_cast<float>(std::atof(v));
-        } else if (std::strcmp(key, "--eq-sweep") == 0) {
+            args.eqHighShelfGainDb = static_cast<float>(std::atof(v));
+        } else if (std::strcmp(key, "--low-shelf-gain") == 0) {
             const char* v = nextArg(); if (!v) return false;
-            args.eqSweepHz = static_cast<float>(std::atof(v));
+            args.eqLowShelfGainDb = static_cast<float>(std::atof(v));
         } else if (std::strcmp(key, "--master-volume") == 0) {
             const char* v = nextArg(); if (!v) return false;
             args.masterVolumeDb = static_cast<float>(std::atof(v));
@@ -305,8 +306,8 @@ int main(int argc, char** argv)
     hexcaster::ParamRegistry params;
     params.set(hexcaster::ParamId::InputGain_dB,          args.gainDb);
     params.set(hexcaster::ParamId::NoiseGateThreshold_dB, args.gateThresholdDb);
-    params.set(hexcaster::ParamId::EqGain_dB,             args.eqGainDb);
-    params.set(hexcaster::ParamId::EqSweepHz,             args.eqSweepHz);
+    params.set(hexcaster::ParamId::HighShelfGain_dB,      args.eqHighShelfGainDb);
+    params.set(hexcaster::ParamId::LowShelfGain_dB,       args.eqLowShelfGainDb);
     params.set(hexcaster::ParamId::MasterVolume_dB,       args.masterVolumeDb);
     params.set(hexcaster::ParamId::BloomDepth_dB,          args.bloomDepth);
     params.set(hexcaster::ParamId::BloomCompensation,     args.bloomCompensation);
@@ -331,9 +332,12 @@ int main(int argc, char** argv)
             {"NoiseGateAttackMs",     hexcaster::ParamId::NoiseGateAttackMs},
             {"NoiseGateReleaseMs",    hexcaster::ParamId::NoiseGateReleaseMs},
             {"NoiseGateHoldMs",       hexcaster::ParamId::NoiseGateHoldMs},
-            {"EqGain_dB",             hexcaster::ParamId::EqGain_dB},
-            {"EqSweepHz",             hexcaster::ParamId::EqSweepHz},
-            {"EqQ",                   hexcaster::ParamId::EqQ},
+            {"HighShelfHz",           hexcaster::ParamId::HighShelfHz},
+            {"HighShelfGain_dB",      hexcaster::ParamId::HighShelfGain_dB},
+            {"HighShelfBw",           hexcaster::ParamId::HighShelfBw},
+            {"LowShelfHz",            hexcaster::ParamId::LowShelfHz},
+            {"LowShelfGain_dB",       hexcaster::ParamId::LowShelfGain_dB},
+            {"LowShelfBw",            hexcaster::ParamId::LowShelfBw},
             {"MasterVolume_dB",       hexcaster::ParamId::MasterVolume_dB},
         };
         for (auto& e : kNames)
@@ -356,9 +360,9 @@ int main(int argc, char** argv)
 
     hexcaster::NamStage nam;
 
-    hexcaster::MidSweepEQ eq;
-    eq.setGainDb (args.eqGainDb);
-    eq.setSweepHz(args.eqSweepHz);
+    hexcaster::ShelfEQ eq;
+    eq.setHighShelfGainDb(args.eqHighShelfGainDb);
+    eq.setLowShelfGainDb (args.eqLowShelfGainDb);
 
     hexcaster::GainStage masterVolume;
     masterVolume.setGainDb(args.masterVolumeDb);
@@ -460,9 +464,8 @@ int main(int argc, char** argv)
         bloom.setReleaseMs         (params.get(hexcaster::ParamId::BloomReleaseMs));
         bloom.setSensitivity       (params.get(hexcaster::ParamId::BloomSensitivity_dB));
         bloom.setActivityThreshold (params.get(hexcaster::ParamId::BloomActivityThreshold));
-        eq.setGainDb            (params.get(hexcaster::ParamId::EqGain_dB));
-        eq.setSweepHz           (params.get(hexcaster::ParamId::EqSweepHz));
-        eq.setQ                 (params.get(hexcaster::ParamId::EqQ));
+        eq.setHighShelfGainDb   (params.get(hexcaster::ParamId::HighShelfGain_dB));
+        eq.setLowShelfGainDb    (params.get(hexcaster::ParamId::LowShelfGain_dB));
         masterVolume.setGainDb  (params.get(hexcaster::ParamId::MasterVolume_dB));
         inputMeter.measure(buf, n);
         pipeline.process(buf, n);
@@ -525,9 +528,8 @@ int main(int argc, char** argv)
             d.bloomAttack          = params.get(hexcaster::ParamId::BloomAttackMs);
             d.bloomRelease         = params.get(hexcaster::ParamId::BloomReleaseMs);
             d.harmonicActivity     = bloom.getHarmonicActivity();
-            d.eqGain               = params.get(hexcaster::ParamId::EqGain_dB);
-            d.eqSweep              = params.get(hexcaster::ParamId::EqSweepHz);
-            d.eqQ                  = params.get(hexcaster::ParamId::EqQ);
+            d.eqGain               = params.get(hexcaster::ParamId::HighShelfGain_dB);
+            d.eqSweep              = params.get(hexcaster::ParamId::LowShelfGain_dB);
             d.inputLevelDb         = inputMeter.getPeakDb();
             d.outputLevelDb        = outputMeter.getPeakDb();
             return d;

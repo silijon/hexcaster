@@ -45,6 +45,14 @@ enum class ParamId : uint32_t {
     // --- Master Volume ---
     MasterVolume_dB       = 70,  // Final output level before power amp [-60, +24] dB
 
+    // --- Shelf EQ (replaces Mid-Sweep EQ in the pipeline) ---
+    HighShelfHz           = 80,  // High-shelf corner frequency [1000, 16000] Hz
+    HighShelfGain_dB      = 81,  // High-shelf boost/cut [-32, +12] dB
+    HighShelfBw           = 82,  // High-shelf bandwidth (octaves) [0.1, 4.0]
+    LowShelfHz            = 83,  // Low-shelf corner frequency [40, 1000] Hz
+    LowShelfGain_dB       = 84,  // Low-shelf boost/cut [-32, +12] dB
+    LowShelfBw            = 85,  // Low-shelf bandwidth (octaves) [0.1, 4.0]
+
     kCount              // Always last
 };
 
@@ -74,6 +82,12 @@ inline bool paramIdFromName(std::string_view name, ParamId& out)
         { "EqSweepHz",              ParamId::EqSweepHz              },
         { "EqQ",                    ParamId::EqQ                    },
         { "MasterVolume_dB",        ParamId::MasterVolume_dB        },
+        { "HighShelfHz",            ParamId::HighShelfHz            },
+        { "HighShelfGain_dB",       ParamId::HighShelfGain_dB       },
+        { "HighShelfBw",            ParamId::HighShelfBw            },
+        { "LowShelfHz",             ParamId::LowShelfHz             },
+        { "LowShelfGain_dB",        ParamId::LowShelfGain_dB        },
+        { "LowShelfBw",             ParamId::LowShelfBw             },
     };
     for (auto& e : kTable) {
         if (e.name == name) { out = e.id; return true; }

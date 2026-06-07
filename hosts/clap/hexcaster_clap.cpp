@@ -132,9 +132,8 @@ static constexpr ClapParamMeta kParams[] = {
     { (clap_id)hexcaster::ParamId::BloomReleaseMs,        "Bloom Release",     "Bloom",      false, false,  0.0,  0.0, 0.0 },
     { (clap_id)hexcaster::ParamId::BloomSensitivity_dB,   "Bloom Sensitivity", "Bloom",      false, false,  0.0,  0.0, 0.0 },
     { (clap_id)hexcaster::ParamId::BloomActivityThreshold,"Bloom Activity",    "Bloom",      false, false,  0.0,  0.0, 0.0 },
-    { (clap_id)hexcaster::ParamId::EqGain_dB,             "EQ Gain",           "EQ",         false, false,  0.0,  0.0, 0.0 },
-    { (clap_id)hexcaster::ParamId::EqSweepHz,             "EQ Sweep",          "EQ",         false, false,  0.0,  0.0, 0.0 },
-    { (clap_id)hexcaster::ParamId::EqQ,                   "EQ Q",              "EQ",         false, false,  0.0,  0.0, 0.0 },
+    { (clap_id)hexcaster::ParamId::HighShelfGain_dB,      "High Shelf Gain",   "EQ",         false, false,  0.0,  0.0, 0.0 },
+    { (clap_id)hexcaster::ParamId::LowShelfGain_dB,       "Low Shelf Gain",    "EQ",         false, false,  0.0,  0.0, 0.0 },
     { (clap_id)hexcaster::ParamId::MasterVolume_dB,       "Master Volume",     "Output",     false, false,  0.0,  0.0, 0.0 },
     // Non-registry params: inline ranges used directly.
     { kModelReloadParamId, "Model Reload",      "Model",   true,  false, 0.0,  1.0, 0.0 },
@@ -172,7 +171,7 @@ struct HexCasterCLAP {
     hexcaster::GainStage       bloomPreGain;
     hexcaster::NamStage        nam;
     hexcaster::GainStage       bloomPostGain;
-    hexcaster::MidSweepEQ      eq;
+    hexcaster::ShelfEQ         eq;
     hexcaster::GainStage       masterVolume;
     hexcaster::BloomController bloom;
     hexcaster::Pipeline        pipeline;
@@ -251,9 +250,8 @@ struct HexCasterCLAP {
         bloom.setSensitivity      (params.get(P::BloomSensitivity_dB));
         bloom.setActivityThreshold(params.get(P::BloomActivityThreshold));
 
-        eq.setGainDb (params.get(P::EqGain_dB));
-        eq.setSweepHz(params.get(P::EqSweepHz));
-        eq.setQ      (params.get(P::EqQ));
+        eq.setHighShelfGainDb(params.get(P::HighShelfGain_dB));
+        eq.setLowShelfGainDb (params.get(P::LowShelfGain_dB));
 
         masterVolume.setGainDb(params.get(P::MasterVolume_dB));
     }

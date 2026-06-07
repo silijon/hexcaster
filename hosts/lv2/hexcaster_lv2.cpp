@@ -116,7 +116,7 @@ struct HexCasterLV2 {
     hexcaster::GainStage       bloomPreGain;
     hexcaster::NamStage        nam;
     hexcaster::GainStage       bloomPostGain;
-    hexcaster::MidSweepEQ      eq;
+    hexcaster::ShelfEQ         eq;
     hexcaster::GainStage       masterVolume;
     hexcaster::BloomController bloom;
     hexcaster::Pipeline        pipeline;
@@ -229,9 +229,8 @@ static void run(LV2_Handle instance, uint32_t sampleCount)
     self->bloom.setReleaseMs   (self->params.get(hexcaster::ParamId::BloomReleaseMs));
     self->bloom.setSensitivity       (self->params.get(hexcaster::ParamId::BloomSensitivity_dB));
     self->bloom.setActivityThreshold (self->params.get(hexcaster::ParamId::BloomActivityThreshold));
-    self->eq.setGainDb         (self->params.get(hexcaster::ParamId::EqGain_dB));
-    self->eq.setSweepHz        (self->params.get(hexcaster::ParamId::EqSweepHz));
-    self->eq.setQ              (self->params.get(hexcaster::ParamId::EqQ));
+    self->eq.setHighShelfGainDb(self->params.get(hexcaster::ParamId::HighShelfGain_dB));
+    self->eq.setLowShelfGainDb (self->params.get(hexcaster::ParamId::LowShelfGain_dB));
     self->masterVolume.setGainDb(self->params.get(hexcaster::ParamId::MasterVolume_dB));
 
     // Model reload trigger: fire background load on 0 -> 1 rising edge only.

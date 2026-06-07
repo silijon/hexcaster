@@ -8,9 +8,8 @@ namespace hexcaster::tui {
 std::vector<MeterDesc> buildEqScreenMeters()
 {
     return {
-        MeterDesc::fromParam("EQ Gain",  ParamId::EqGain_dB, " dB"),
-        MeterDesc::fromParam("EQ Sweep", ParamId::EqSweepHz, " Hz"),
-        MeterDesc::fromParam("EQ Q",     ParamId::EqQ,       ""),
+        MeterDesc::fromParam("Lo Shelf Gain", ParamId::LowShelfGain_dB,  " dB"),
+        MeterDesc::fromParam("Hi Shelf Gain", ParamId::HighShelfGain_dB, " dB"),
     };
 }
 
@@ -24,10 +23,10 @@ ftxui::Element renderEqScreen(const MeterData&              data,
     (void)data;
 
     auto infoRow = hbox(Elements{
-        text(" Range: Gain +/-12 dB  |  Sweep 300-2500 Hz  |  Q 0.3-3.0") | dim,
+        text(" Range: Gain [-32, +12] dB  |  Lo shelf @ 175 Hz  |  Hi shelf @ 4500 Hz") | dim,
     });
     return vbox(Elements{
-        text(" EQ: Mid-Sweep Peaking Filter") | bold,
+        text(" EQ: High + Low Shelf") | bold,
         text(""),
         makeMeterRow(meters, selectedIdx, data, registry, midiMap),
         text(""),
