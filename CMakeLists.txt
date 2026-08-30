@@ -30,6 +30,22 @@ option(HEXCASTER_BUILD_STANDALONE "Build standalone runtime"   ON)
 option(HEXCASTER_BUILD_TESTS      "Build tests"                ON)
 option(HEXCASTER_BUILD_TUI        "Build TUI for standalone"   ON)
 option(HEXCASTER_DEBUG_CHANNELS   "CLAP: expose internal DSP signals on extra output channels" OFF)
+option(HEXCASTER_OPTIMIZE_RPI5    "Use Cortex-A76 tuning for Raspberry Pi 5 ARM64 builds" ON)
+option(HEXCASTER_ENABLE_LTO       "Enable interprocedural optimization in Release builds" ON)
+
+if(HEXCASTER_OPTIMIZE_RPI5 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+  add_compile_options($<$<CONFIG:Release>:-mcpu=cortex-a76>)
+endif()
+
+if(HEXCASTER_ENABLE_LTO)
+  include(CheckIPOSupported)
+  check_ipo_supported(RESULT HEXCASTER_IPO_SUPPORTED OUTPUT HEXCASTER_IPO_ERROR)
+  if(HEXCASTER_IPO_SUPPORTED)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+  else()
+    message(WARNING "LTO unavailable: ${HEXCASTER_IPO_ERROR}")
+  endif()
+endif()
 
 # External dependencies
 include(cmake/dependencies.cmake)

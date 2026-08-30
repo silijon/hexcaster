@@ -140,21 +140,20 @@ NeuralAudio references:
 - Repository (SSH): [git@github.com](mailto:git@github.com):mikeoliphant/NeuralAudio.git
 - Repository (HTTPS): [https://github.com/mikeoliphant/NeuralAudio](https://github.com/mikeoliphant/NeuralAudio)
 
-NeuralAudio supports:
-
-- NAM WaveNet models (.nam files)
-- NAM LSTM models
-- RTNeural keras LSTM/GRU models
+HexCaster supports NAM A2 WaveNet models (.nam files), including A2 Lite,
+A2 Full, and packed/scalable A2 containers.
 
 Preferred configuration:
 
-- Use NeuralAudio internal implementation (default)
-- Enable static RTNeural builds for optimized architectures
-- Avoid NAM Core fallback unless benchmarking
+- Use NeuralAudio's native static A2 implementation for standard models
+- Use NAMCore as the fallback for non-standard A2 models
+- Do not build or use RTNeural
 
 CMake recommendation:
 
--DBUILD_STATIC_RTNEURAL=ON
+-DBUILD_STATIC_INTERNAL_NAMA2=ON
+-DBUILD_NAMCORE=ON
+-DBUILD_RTNEURAL=OFF
 
 Model loading requirements:
 
@@ -165,9 +164,9 @@ Model loading requirements:
 
 Performance guidance for Raspberry Pi 5:
 
-- Prefer Nano / Feather / Lite WaveNet models
-- Prefer small LSTM models (1x8, 1x12)
-- Benchmark Standard models before allowing in production
+- Benchmark both A2 Lite and A2 Full
+- Prefer A2 Lite when its headroom enables lower latency or additional DSP
+- Permit A2 Full when sustained deadline measurements are safe
 
 The DSP core must treat NeuralAudio as a deterministic, real-time-safe processing unit:
 
@@ -399,8 +398,9 @@ README:
 
 Build configuration guidance:
 
-- Enable static RTNeural builds: -DBUILD_STATIC_RTNEURAL=ON
-- Avoid enabling NAMCore unless benchmarking
+- Enable native A2 kernels: `-DBUILD_STATIC_INTERNAL_NAMA2=ON`
+- Enable NAMCore's A2 fallback: `-DBUILD_NAMCORE=ON -DNAM_ENABLE_A2_FAST=ON`
+- Disable RTNeural and legacy A1 kernels
 
 NeuralAudio must be treated as an initialization-time dependency only. Model loading and configuration must not occur inside the audio processing thread.
 

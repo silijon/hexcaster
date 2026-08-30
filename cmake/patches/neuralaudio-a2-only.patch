@@ -1,0 +1,149 @@
+diff --git a/NeuralAudio/CMakeLists.txt b/NeuralAudio/CMakeLists.txt
+index ca4bb30..fc10001 100644
+--- a/NeuralAudio/CMakeLists.txt
++++ b/NeuralAudio/CMakeLists.txt
+@@ -3,6 +3,8 @@ set(CMAKE_CXX_STANDARD 20)
+ add_definitions(-DNAM_SAMPLE_FLOAT)
+ add_definitions(-DDSP_SAMPLE_FLOAT)
+ 
++option(BUILD_RTNEURAL "Build RTNeural support" OFF)
++
+ option(BUILD_STATIC_RTNEURAL "Build Static RTNeural" OFF)
+ if(BUILD_STATIC_RTNEURAL)
+@@ -117,9 +119,6 @@ set(SOURCES
+ 	NeuralModel.cpp
+ 	NeuralModelImpl.h
+ 	NAMModel.h
+-	RTNeuralModel.h
+-	RTNeuralLoader.cpp
+-	RTNeuralLoader.h
+ 	Activation.h
+ 	ChannelBuffer.h
+ 	MatMul.h
+@@ -132,6 +131,12 @@ set(SOURCES
+ 	CompositeModel.h
+ 	TemplateHelper.h)
+ 
++if(BUILD_RTNEURAL)
++	list(APPEND SOURCES RTNeuralModel.h RTNeuralLoader.cpp RTNeuralLoader.h)
++else()
++	add_definitions(-DNEURALAUDIO_NO_RTNEURAL)
++endif()
++
+ if(BUILD_NAMCORE)
+ 	set(NAM_SOURCES	../deps/NeuralAmpModelerCore/NAM/activations.h
+@@ -165,9 +170,6 @@ add_library(NeuralAudio OBJECT ${SOURCES} ${NAM_SOURCES})
+ target_include_directories(NeuralAudio PUBLIC ..)
+ target_include_directories(NeuralAudio SYSTEM PRIVATE ../deps/NeuralAmpModelerCore)
+-target_include_directories(NeuralAudio SYSTEM PRIVATE ../deps/RTNeural)
+ target_include_directories(NeuralAudio SYSTEM PRIVATE ../deps/math_approx)
+-target_include_directories(NeuralAudio SYSTEM PRIVATE ../deps/RTNeural/modules/Eigen)
+-target_include_directories(NeuralAudio SYSTEM PRIVATE ../deps/RTNeural/modules/json)
+ 
+ set_property(TARGET NeuralAudio PROPERTY POSITION_INDEPENDENT_CODE ON)
+@@ -175,9 +177,13 @@ set_property(TARGET NeuralAudio PROPERTY POSITION_INDEPENDENT_CODE ON)
+ set(CMAKE_WARN_DEPRECATED OFF CACHE BOOL "" FORCE)
+ 
+-add_subdirectory(../deps/RTNeural RTNeural)
+ add_subdirectory(../deps/math_approx math_approx)
+-target_link_libraries(NeuralAudio LINK_PUBLIC RTNeural math_approx)
++target_link_libraries(NeuralAudio LINK_PUBLIC math_approx)
++
++if(BUILD_RTNEURAL)
++	add_subdirectory(../deps/RTNeural RTNeural)
++	target_link_libraries(NeuralAudio LINK_PUBLIC RTNeural)
++endif()
+ 
+ source_group(NeuralAudio ${CMAKE_CURRENT_SOURCE_DIR} FILES ${SOURCES})
+diff --git a/NeuralAudio/NeuralModel.h b/NeuralAudio/NeuralModel.h
+index f1ad7f8..fc10002 100644
+--- a/NeuralAudio/NeuralModel.h
++++ b/NeuralAudio/NeuralModel.h
+@@ -25,6 +25,14 @@ namespace NeuralAudio
+ 		OnDemand
+ 	};
+ 
++	enum ENAMModelVariant
++	{
++		UnknownNAMVariant,
++		A2Lite,
++		A2Full,
++		A2Composite
++	};
++
+ 	class NeuralModel
+ 	{
+@@ -34,6 +42,11 @@ namespace NeuralAudio
+ 		{
+ 		}
+ 
++		virtual ENAMModelVariant GetNAMModelVariant()
++		{
++			return namModelVariant;
++		}
++
++		void SetNAMModelVariant(ENAMModelVariant variant)
++		{
++			namModelVariant = variant;
++		}
++
+ 		virtual EModelLoadMode GetLoadMode()
+@@ -137,6 +150,7 @@ namespace NeuralAudio
+ 		float sampleRate = 48000;
+ 		std::string modelVersion = "";
+ 		std::vector<std::pair<std::string, std::string>> metadata;
++		ENAMModelVariant namModelVariant = UnknownNAMVariant;
+ 	};
+diff --git a/NeuralAudio/NeuralModel.cpp b/NeuralAudio/NeuralModel.cpp
+index 717b65c..fc10003 100644
+--- a/NeuralAudio/NeuralModel.cpp
++++ b/NeuralAudio/NeuralModel.cpp
+@@ -5,7 +5,9 @@
+ #ifdef BUILD_STATIC_RTNEURAL
+ #include "RTNeuralLoader.h"
+ #endif
++#ifndef NEURALAUDIO_NO_RTNEURAL
+ #include "RTNeuralModel.h"
++#endif
+ #include "InternalModel.h"
+@@ -350,6 +352,7 @@ namespace NeuralAudio
+ 				model->LoadFromJson(modelJson);
++				model->SetNAMModelVariant(A2Composite);
+ 
+ 				newModel = model;
+@@ -392,6 +395,7 @@ namespace NeuralAudio
+ 									model->LoadFromNAMJson(modelJson);
++									model->SetNAMModelVariant(A2Lite);
+ 
+@@ -406,6 +410,7 @@ namespace NeuralAudio
+ 									model->LoadFromNAMJson(modelJson);
++									model->SetNAMModelVariant(A2Full);
+ 
+@@ -514,6 +519,7 @@ namespace NeuralAudio
+ 		else if ((extension == ".json") || (extension == ".aidax"))
+ 		{
++#ifndef NEURALAUDIO_NO_RTNEURAL
+ 			const auto layers = modelJson.at("layers");
+@@ -563,6 +569,7 @@ namespace NeuralAudio
+ 
+ 				newModel = model;
+ 			}
++#endif
+ 		}
+diff --git a/NeuralAudio/CompositeModel.h b/NeuralAudio/CompositeModel.h
+index c95d579..fc10004 100644
+--- a/NeuralAudio/CompositeModel.h
++++ b/NeuralAudio/CompositeModel.h
+@@ -54,6 +54,14 @@ namespace NeuralAudio
+ 				models[currentModelIndex.load()]->Process(input, output, numSamples);
+ 			}
+ 
++			ENAMModelVariant GetNAMModelVariant() override
++			{
++				if (currentModelIndex == -1)
++					return UnknownNAMVariant;
++
++				return models[currentModelIndex.load()]->GetNAMModelVariant();
++			}
++
+ 			void Prewarm() override

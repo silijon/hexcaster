@@ -97,9 +97,9 @@ static void testParamRegistry()
 {
     hexcaster::ParamRegistry registry;
 
-    // Default input gain should be 0 dB
+    // Default input gain matches the product's current safe input trim.
     const float def = registry.get(hexcaster::ParamId::InputGain_dB);
-    CHECK(std::fabs(def) < 1e-6f, "Default InputGain_dB is not 0");
+    CHECK(std::fabs(def - (-10.f)) < 1e-6f, "Default InputGain_dB is not -10 dB");
 
     // Set and retrieve
     registry.set(hexcaster::ParamId::InputGain_dB, 12.f);

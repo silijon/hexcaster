@@ -54,6 +54,7 @@ struct Args {
     std::string  inputDevice    = "hw:2,0";
     std::string  outputDevice   = "hw:2,0";
     std::string  modelPath;
+    hexcaster::NamQualityPolicy namQuality = hexcaster::NamQualityPolicy::Auto;
     std::string  midiDevice;                    // empty = MIDI disabled
     unsigned int sampleRate     = 48000;
     unsigned int bufferFrames   = 128;
@@ -79,6 +80,7 @@ static void printUsage(const char* prog)
         "\n"
         "Options:\n"
         "  --model <path>              NAM model file (.nam)  [required]\n"
+        "  --nam-quality <mode>        A2 packed-model policy: auto, lite, full  [auto]\n"
         "  --device <hw:X,Y>           Set both input and output device\n"
         "  --input-device <dev>        Input audio device\n"
         "  --output-device <dev>       Output audio device\n"
@@ -174,6 +176,15 @@ static bool parseArgs(int argc, char** argv, Args& args)
         if (std::strcmp(key, "--model") == 0) {
             const char* v = nextArg(); if (!v) return false;
             args.modelPath = v;
+        } else if (std::strcmp(key, "--nam-quality") == 0) {
+            const char* v = nextArg(); if (!v) return false;
+            if (std::strcmp(v, "auto") == 0) args.namQuality = hexcaster::NamQualityPolicy::Auto;
+            else if (std::strcmp(v, "lite") == 0) args.namQuality = hexcaster::NamQualityPolicy::Lite;
+            else if (std::strcmp(v, "full") == 0) args.namQuality = hexcaster::NamQualityPolicy::Full;
+            else {
+                std::fprintf(stderr, "Error: --nam-quality must be auto, lite, or full\n");
+                return false;
+            }
         } else if (std::strcmp(key, "--device") == 0) {
             const char* v = nextArg(); if (!v) return false;
             args.inputDevice = args.outputDevice = v;
@@ -396,7 +407,7 @@ int main(int argc, char** argv)
     // -------------------------------------------------------------------------
 
     std::fprintf(stdout, "Loading model: %s\n", args.modelPath.c_str());
-    if (!nam.loadModel(args.modelPath)) {
+    if (!nam.loadModel(args.modelPath, args.namQuality)) {
         std::fprintf(stderr, "Error: failed to load model '%s'\n", args.modelPath.c_str());
         return 1;
     }
@@ -407,7 +418,12 @@ int main(int argc, char** argv)
         pipeline.process(warmup.data(), static_cast<int>(args.bufferFrames));
     }
 
-    std::fprintf(stdout, "Model loaded: %s\n", nam.modelPath().c_str());
+    const auto modelInfo = nam.modelInfo();
+    std::fprintf(stdout,
+        "Model loaded: %s  variant=%s version=%s engine=%s quality=%.2f rate=%.0f\n",
+        modelInfo.path.c_str(), hexcaster::namModelVariantName(modelInfo.variant),
+        modelInfo.version.c_str(), modelInfo.nativeStatic ? "NeuralAudio native" : "NAMCore/dynamic",
+        modelInfo.selectedQuality, modelInfo.sampleRate);
 
     // -------------------------------------------------------------------------
     // Audio engine
@@ -517,7 +533,7 @@ int main(int argc, char** argv)
             d.inputGain            = params.get(hexcaster::ParamId::InputGain_dB);
             d.masterVolume         = params.get(hexcaster::ParamId::MasterVolume_dB);
             d.bloomDetectorEnv       = bloom.getDetectorEnvelope();
-            d.bloomEnvelope          = bloom.getEnvelope();
+            d.bloomEnvelope          = bloom.getGainEnvelope();
             d.bloomBasePre           = params.get(hexcaster::ParamId::BloomBasePre_dB);
             d.bloomBasePost          = params.get(hexcaster::ParamId::BloomBasePost_dB);
             d.bloomPreGainApplied    = bloomPreGain.getGainDb();
@@ -528,7 +544,7 @@ int main(int argc, char** argv)
             d.bloomAttack          = params.get(hexcaster::ParamId::BloomAttackMs);
             d.bloomRelease         = params.get(hexcaster::ParamId::BloomReleaseMs);
             d.harmonicActivity     = bloom.getHarmonicActivity();
-            d.eqHighSelfGain       = params.get(hexcaster::ParamId::HighShelfGain_dB);
+            d.eqHighShelfGain      = params.get(hexcaster::ParamId::HighShelfGain_dB);
             d.eqLowShelfGain       = params.get(hexcaster::ParamId::LowShelfGain_dB);
             d.inputLevelDb         = inputMeter.getPeakDb();
             d.outputLevelDb        = outputMeter.getPeakDb();

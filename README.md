@@ -2,7 +2,7 @@
 
 Neural dynamic gain amp platform for Linux / Raspberry Pi / macOS.
 
-HexCaster is a DSP-core-first guitar amplifier engine built around Neural Amp Modeling (NAM). It provides a noise gate, dynamic pre/post gain control ("Bloom"), and a mid-sweep EQ. The core is real-time safe, framework-independent, and targets embedded deployment on Raspberry Pi 5 driving a physical guitar cabinet.
+HexCaster is a DSP-core-first guitar amplifier engine built around NAM Architecture 2 (A2). It provides a noise gate, dynamic pre/post gain control ("Bloom"), and a mid-sweep EQ. The core is real-time safe, framework-independent, and targets embedded deployment on Raspberry Pi 5 driving a physical guitar cabinet.
 
 Hosting wrappers (LV2, CLAP, standalone daemon) are thin layers over the DSP core. The LV2 and CLAP plugins are the primary development and validation targets; the standalone runtime is the production deployment target.
 
@@ -110,6 +110,7 @@ Run with a NAM model:
 ./build/hosts/standalone/hexcaster_standalone \
   --model /path/to/model.nam \
   --device hw:2,0 \
+  --nam-quality auto \
   --buffer 128
 ```
 
@@ -196,12 +197,15 @@ To load a different model, overwrite the sidecar file and toggle Model Reload ag
 
 **Model path is saved with the project.** When you reopen a Reaper project, HexCaster restores the last loaded model automatically via the plugin state mechanism (LV2 state interface / CLAP state extension).
 
-### Recommended models
+### A2 model selection
 
-HexCaster targets real-time performance on Raspberry Pi 5. For development on desktop hardware any NAM model works. For Pi deployment, prefer:
+HexCaster accepts A2 models only. Direct A2 Lite and Full files are detected from their architecture and loaded through NeuralAudio's optimized native implementation. Packed A2 models containing both qualities are selected with:
 
-- WaveNet Nano / Feather / Lite variants
-- LSTM models at 1×8 or 1×12 size
+- `--nam-quality auto` — select Lite from a packed model (the Pi-oriented default)
+- `--nam-quality lite` — require/select Lite
+- `--nam-quality full` — require/select Full
+
+Non-standard A2 models fall back to NAMCore. RTNeural is not built or used.
 
 `.nam` files are available at [tonehunt.org](https://tonehunt.org).
 

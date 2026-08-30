@@ -36,6 +36,7 @@
 #include <clap/clap.h>
 
 #include <atomic>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <new>  // IWYU pragma: keep  (placement new)

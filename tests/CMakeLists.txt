@@ -12,3 +12,12 @@ target_link_libraries(hexcaster_tests
 )
 
 add_test(NAME passthrough COMMAND hexcaster_tests)
+
+add_executable(hexcaster_nam_a2_tests test_nam_a2.cpp)
+target_link_libraries(hexcaster_nam_a2_tests PRIVATE hexcaster_components)
+
+add_test(NAME nam_a2
+  COMMAND hexcaster_nam_a2_tests
+    ${neuralaudio_SOURCE_DIR}/Utils/Models/BossWN-a2.nam
+    ${neuralaudio_SOURCE_DIR}/Utils/Models/BossWN-standard.nam
+)
