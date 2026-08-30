@@ -12,6 +12,8 @@
 #include "hexcaster/midi_map.h"
 #include "hexcaster/param_id.h"
 
+    bool runtimeFailed = false;
+
 #ifdef HEXCASTER_TUI_ENABLED
 #include "tui/tui.h"
 #endif
@@ -550,8 +552,13 @@ int main(int argc, char** argv)
 
         // Run the audio engine on a background thread.
         // The thread is given SCHED_FIFO priority inside engine.run().
+        std::atomic<bool> audioFailed{false};
         std::thread audioThread([&]() {
             engine.run();
+            if (!gQuit.load(std::memory_order_relaxed)) {
+                audioFailed.store(true, std::memory_order_relaxed);
+                gQuit.store(true, std::memory_order_relaxed);
+            }
         });
 
         // Run TUI on the main thread (FTXUI owns the terminal here).
@@ -563,6 +570,12 @@ int main(int argc, char** argv)
         // TUI has exited -- stop audio and clean up
         engine.stop();
         audioThread.join();
+
+        if (audioFailed.load(std::memory_order_relaxed)) {
+            runtimeFailed = true;
+            std::fprintf(stderr, "Audio engine failed: %s\n",
+                         engine.errorMessage().c_str());
+        }
 
     } else
 #endif // HEXCASTER_TUI_ENABLED
@@ -581,7 +594,15 @@ int main(int argc, char** argv)
         });
 
         engine.run();
+        const bool audioFailed = !gQuit.load(std::memory_order_relaxed);
+        gQuit.store(true, std::memory_order_relaxed);
         watcher.join();
+
+        if (audioFailed) {
+            runtimeFailed = true;
+            std::fprintf(stderr, "Audio engine failed: %s\n",
+                         engine.errorMessage().c_str());
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -593,5 +614,5 @@ int main(int argc, char** argv)
     engine.close();
 
     std::fprintf(stdout, "Bye.\n");
-    return 0;
+    return runtimeFailed ? 1 : 0;
 }

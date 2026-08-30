@@ -113,6 +113,52 @@ On macOS the bundle is installed to `~/Library/Audio/Plug-Ins/CLAP/hexcaster.cla
 cmake --build build --target hexcaster_standalone -j$(nproc)
 ```
 
+### Install as a Raspberry Pi system service
+
+Configure a Pi production build with a system prefix, then build and install:
+
+```sh
+cmake -S . -B build-pi \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX=/usr \
+  -DHEXCASTER_BUILD_STANDALONE=ON \
+  -DHEXCASTER_BUILD_TUI=OFF \
+  -DHEXCASTER_BUILD_LV2=OFF \
+  -DHEXCASTER_BUILD_CLAP=OFF \
+  -DHEXCASTER_BUILD_TESTS=OFF
+
+cmake --build build-pi -j$(nproc)
+sudo cmake --build build-pi --target install-pi
+```
+
+`install-pi` installs `/usr/bin/hexcaster`, creates the dedicated `hexcaster`
+system user, installs and enables `hexcaster.service`, and creates the model
+directory. It deliberately does not start the service before it is configured.
+
+Install the production model and configuration:
+
+```sh
+sudo install -o root -g hexcaster -m 0640 amp.nam \
+  /var/lib/hexcaster/models/default.nam
+sudo cp /etc/hexcaster/hexcaster.env.example \
+  /etc/hexcaster/hexcaster.env
+sudo editor /etc/hexcaster/hexcaster.env
+sudo systemctl start hexcaster
+```
+
+The service is enabled for subsequent boots. Verify it with:
+
+```sh
+systemctl status hexcaster
+journalctl -u hexcaster -f
+```
+
+Use stable ALSA card names such as `hw:CARD=V276,DEV=0` in the environment
+file; numeric `hw:2,0` identifiers can change across boots. The daemon runs as
+an isolated service account with audio-group access, `SCHED_FIFO` permission,
+automatic failure restart, locked-memory allowance, and a read-only system
+filesystem.
+
 Run with a NAM model:
 
 ```sh

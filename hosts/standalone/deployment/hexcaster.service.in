@@ -1,0 +1,54 @@
+[Unit]
+Description=HexCaster realtime guitar DSP engine
+Documentation=https://github.com/jd/hexcaster
+Wants=sound.target systemd-udev-settle.service
+After=sound.target systemd-udev-settle.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=hexcaster
+Group=hexcaster
+SupplementaryGroups=audio
+
+Environment=HEXCASTER_MODEL=@CMAKE_INSTALL_FULL_LOCALSTATEDIR@/lib/hexcaster/models/default.nam
+Environment=HEXCASTER_INPUT=hw:CARD=V276,DEV=0
+Environment=HEXCASTER_OUTPUT=hw:CARD=sndrpihifiberry,DEV=0
+Environment=HEXCASTER_QUALITY=auto
+Environment=HEXCASTER_BUFFER=128
+Environment=HEXCASTER_EXTRA_ARGS=
+EnvironmentFile=-@CMAKE_INSTALL_FULL_SYSCONFDIR@/hexcaster/hexcaster.env
+
+ExecStartPre=/usr/bin/test -r ${HEXCASTER_MODEL}
+ExecStart=@CMAKE_INSTALL_FULL_BINDIR@/hexcaster --model ${HEXCASTER_MODEL} --input-device ${HEXCASTER_INPUT} --output-device ${HEXCASTER_OUTPUT} --nam-quality ${HEXCASTER_QUALITY} --buffer ${HEXCASTER_BUFFER} $HEXCASTER_EXTRA_ARGS
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=5
+KillSignal=SIGTERM
+
+# Realtime scheduling and locked-memory allowance.
+LimitRTPRIO=80
+LimitMEMLOCK=infinity
+Nice=-10
+AmbientCapabilities=CAP_SYS_NICE
+CapabilityBoundingSet=CAP_SYS_NICE
+
+# Service isolation. ALSA device access is granted through the audio group.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=no
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=no
+ReadWritePaths=@CMAKE_INSTALL_FULL_LOCALSTATEDIR@/lib/hexcaster
+
+[Install]
+WantedBy=multi-user.target
