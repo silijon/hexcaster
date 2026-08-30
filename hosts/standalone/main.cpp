@@ -528,8 +528,8 @@ int main(int argc, char** argv)
             d.bloomAttack          = params.get(hexcaster::ParamId::BloomAttackMs);
             d.bloomRelease         = params.get(hexcaster::ParamId::BloomReleaseMs);
             d.harmonicActivity     = bloom.getHarmonicActivity();
-            d.eqGain               = params.get(hexcaster::ParamId::HighShelfGain_dB);
-            d.eqSweep              = params.get(hexcaster::ParamId::LowShelfGain_dB);
+            d.eqHighSelfGain       = params.get(hexcaster::ParamId::HighShelfGain_dB);
+            d.eqLowShelfGain       = params.get(hexcaster::ParamId::LowShelfGain_dB);
             d.inputLevelDb         = inputMeter.getPeakDb();
             d.outputLevelDb        = outputMeter.getPeakDb();
             return d;

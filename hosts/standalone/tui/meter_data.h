@@ -44,9 +44,8 @@ struct MeterData {
     float harmonicActivity   = 0.f; // EMA of |delta(smoothedDet)|
     int   bloomMode          = 0;   // 0 = Shaped, 1 = Tracking, 2 = Adaptive
 
-    float eqGain             = 0.f; // dB
-    float eqSweep            = 0.f; // Hz
-    float eqQ                = 0.f; // dimensionless
+    float eqHighShelfGain    = 0.f; // dB
+    float eqLowShelfGain     = 0.f; // Hz
 
     // --- Signal levels (host-level peak metering, dB) ---
     // Range: -60 dB (floor/silence) to 0 dB (full scale).
