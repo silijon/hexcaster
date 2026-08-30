@@ -55,7 +55,12 @@ public:
     unsigned int actualBufferFrames() const override { return actualFrames_; }
 
 private:
-    enum class SampleFormat { Float32, Int32, Int16 };
+    enum class SampleFormat { 
+        Int24Packed, 
+        Float32, 
+        Int32, 
+        Int16 
+    };
 
     static int bytesPerSample(SampleFormat fmt);
 

@@ -17,9 +17,10 @@ namespace hexcaster {
 int AlsaAudioEngine::bytesPerSample(SampleFormat fmt)
 {
     switch (fmt) {
-        case SampleFormat::Float32: return 4;
-        case SampleFormat::Int32:   return 4;
-        case SampleFormat::Int16:   return 2;
+        case SampleFormat::Float32:         return 4;
+        case SampleFormat::Int32:           return 4;
+        case SampleFormat::Int24Packed:     return 3;
+        case SampleFormat::Int16:           return 2;
     }
     return 2;
 }
@@ -40,7 +41,7 @@ AlsaAudioEngine::~AlsaAudioEngine()
 bool AlsaAudioEngine::open(const Config& config)
 {
     config_ = config;
-    captureChannels_  = 2;
+    captureChannels_  = 1;
     playbackChannels_ = 2;
 
     if (!openHandle(config_.inputDevice,  true,  captureHandle_,  captureChannels_,  captureFmt_))
@@ -87,9 +88,10 @@ bool AlsaAudioEngine::openHandle(const std::string& device, bool isCapture,
     // Format probe list -- S16_LE first as it has universal USB support.
     // The ProcessCallback always receives float; conversion happens at the edge.
     const struct { snd_pcm_format_t alsa; SampleFormat our; const char* name; } formats[] = {
-        { SND_PCM_FORMAT_S16_LE,   SampleFormat::Int16,   "S16_LE"   },
-        { SND_PCM_FORMAT_S32_LE,   SampleFormat::Int32,   "S32_LE"   },
-        { SND_PCM_FORMAT_FLOAT_LE, SampleFormat::Float32, "FLOAT_LE" },
+        { SND_PCM_FORMAT_S24_3LE,  SampleFormat::Int24Packed,   "S24_3LE"  },
+        { SND_PCM_FORMAT_S16_LE,   SampleFormat::Int16,         "S16_LE"   },
+        { SND_PCM_FORMAT_S32_LE,   SampleFormat::Int32,         "S32_LE"   },
+        { SND_PCM_FORMAT_FLOAT_LE, SampleFormat::Float32,       "FLOAT_LE" },
     };
 
     snd_pcm_hw_params_t* hw = nullptr;
@@ -100,6 +102,8 @@ bool AlsaAudioEngine::openHandle(const std::string& device, bool isCapture,
         // Start fresh each attempt
         snd_pcm_hw_params_any(handle, hw);
 
+        if (!isCapture && f.alsa == SND_PCM_FORMAT_S24_3LE)
+            continue; // Don't accept 3-bit format on playback
         if (snd_pcm_hw_params_set_access(handle, hw, SND_PCM_ACCESS_RW_INTERLEAVED) < 0)
             continue;
         if (snd_pcm_hw_params_set_format(handle, hw, f.alsa) < 0)
@@ -343,6 +347,27 @@ void AlsaAudioEngine::deinterleaveCapture(const void* raw, float* mono,
                                             int channel)
 {
     switch (captureFmt_) {
+        case SampleFormat::Int24Packed: {
+            const uint8_t* src = static_cast<const uint8_t*>(raw);
+            constexpr float kScale = 1.f / 8388608.f; // 2^23
+
+            for (int i = 0; i < frames; ++i) {
+                const int sampleIndex = i * totalChannels + channel;
+                const uint8_t* p = src + sampleIndex * 3;
+
+                int32_t value =
+                    static_cast<int32_t>(p[0]) |
+                    (static_cast<int32_t>(p[1]) << 8) |
+                    (static_cast<int32_t>(p[2]) << 16);
+
+                // Sign-extend 24-bit signed value to 32 bits.
+                if (value & 0x00800000)
+                    value |= 0xFF000000;
+
+                mono[i] = static_cast<float>(value) * kScale;
+            }
+            break;
+        }
         case SampleFormat::Int16: {
             const int16_t* src = static_cast<const int16_t*>(raw);
             constexpr float kScale = 1.f / 32768.f;
@@ -371,6 +396,44 @@ void AlsaAudioEngine::interleavePlayback(const float* mono, void* raw,
                                           int channelMask)
 {
     switch (playbackFmt_) {
+        case SampleFormat::Int24Packed: {
+            uint8_t* dst = static_cast<uint8_t*>(raw);
+
+            std::memset(
+                dst,
+                0,
+                static_cast<std::size_t>(frames) * totalChannels * 3);
+
+            constexpr float kScale = 8388607.f; // 2^23 - 1
+
+            for (int i = 0; i < frames; ++i) {
+                for (int c = 0; c < totalChannels; ++c) {
+                    if (!(channelMask & (1 << c)))
+                        continue;
+
+                    float sample = mono[i];
+
+                    // Clip to valid PCM range.
+                    if (sample > 1.f)
+                        sample = 1.f;
+                    else if (sample < -1.f)
+                        sample = -1.f;
+
+                    const int32_t value =
+                        static_cast<int32_t>(sample * kScale);
+
+                    const std::size_t sampleIndex =
+                        static_cast<std::size_t>(i) * totalChannels + c;
+
+                    uint8_t* p = dst + sampleIndex * 3;
+
+                    p[0] = static_cast<uint8_t>(value & 0xff);
+                    p[1] = static_cast<uint8_t>((value >> 8) & 0xff);
+                    p[2] = static_cast<uint8_t>((value >> 16) & 0xff);
+                }
+            }
+            break;
+        }
         case SampleFormat::Int16: {
             int16_t* dst = static_cast<int16_t*>(raw);
             std::memset(dst, 0,
