@@ -17,7 +17,7 @@ hexcaster/
 ├── hosts/
 │   ├── clap/           # CLAP plugin wrapper (macOS ARM64 + Linux)
 │   ├── lv2/            # LV2 plugin wrapper (Linux)
-│   └── standalone/     # Headless JACK/ALSA runtime (Linux)
+│   └── standalone/     # Headless ALSA runtime (Linux)
 ├── tests/              # Build validation and DSP unit tests
 └── external/           # Dependencies (NeuralAudio fetched via CMake FetchContent)
 ```
@@ -37,7 +37,94 @@ hexcaster/
 **For CLAP plugin:**
 - No extra system packages. The CLAP SDK is fetched automatically by CMake.
 
-## Building
+## Configure, Build, Run, Debug, Install, and Clean
+
+CMake configure commands are persistent per build directory. Re-run the
+configure command whenever changing an option; CMake preserves options not
+specified again. Use separate build directories for Release and Debug builds.
+
+### CMake options
+
+| Option | Default | Purpose |
+|---|---:|---|
+| `HEXCASTER_BUILD_STANDALONE` | `ON` | Linux ALSA daemon |
+| `HEXCASTER_BUILD_TUI` | `ON` | Terminal UI in the standalone daemon |
+| `HEXCASTER_BUILD_LV2` | `ON` | Linux LV2 development plugin |
+| `HEXCASTER_BUILD_CLAP` | `ON` | Linux/macOS CLAP development plugin |
+| `HEXCASTER_BUILD_TESTS` | `ON` | Unit and NAM integration tests |
+| `HEXCASTER_EXPERIMENTAL_BLOOM` | `OFF` | Experimental chord-score Bloom envelope |
+| `HEXCASTER_DEBUG_CHANNELS` | `OFF` | Extra internal DSP outputs in CLAP |
+| `HEXCASTER_OPTIMIZE_RPI5` | `ON` | Cortex-A76 tuning on ARM64 |
+| `HEXCASTER_ENABLE_LTO` | `ON` | Release-build link-time optimization |
+
+`HEXCASTER_OPTIMIZE_RPI5` has no effect on x86-64. Disable it for a generic
+ARM64 binary intended to run on processors other than the Raspberry Pi 5:
+
+```sh
+cmake -S . -B build-arm64 -DHEXCASTER_OPTIMIZE_RPI5=OFF
+```
+
+### Linux / Raspberry Pi dependencies
+
+On Debian, Ubuntu, or Raspberry Pi OS:
+
+```sh
+sudo apt update
+sudo apt install build-essential cmake git libasound2-dev
+```
+
+Optional LV2 development support requires:
+
+```sh
+sudo apt install liblv2-dev
+```
+
+CLAP, FTXUI, Eigen, JSON, NeuralAudio, and its pinned NAM dependencies are
+fetched by CMake when their corresponding targets are enabled. The first
+configure therefore requires network access.
+
+### Raspberry Pi 5 production build
+
+This is the recommended daemon-only Release configuration:
+
+```sh
+cmake -S . -B build-pi \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX=/usr \
+  -DHEXCASTER_BUILD_STANDALONE=ON \
+  -DHEXCASTER_BUILD_TUI=ON \
+  -DHEXCASTER_BUILD_LV2=OFF \
+  -DHEXCASTER_BUILD_CLAP=OFF \
+  -DHEXCASTER_BUILD_TESTS=ON \
+  -DHEXCASTER_OPTIMIZE_RPI5=ON \
+  -DHEXCASTER_ENABLE_LTO=ON
+
+cmake --build build-pi --parallel "$(nproc)"
+ctest --test-dir build-pi --output-on-failure
+```
+
+For the smallest production build after validation, tests and the TUI may be
+disabled with `-DHEXCASTER_BUILD_TESTS=OFF -DHEXCASTER_BUILD_TUI=OFF`.
+
+### Linux development build
+
+Build every supported target and generate editor tooling:
+
+```sh
+cmake -S . -B build \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+  -DHEXCASTER_BUILD_STANDALONE=ON \
+  -DHEXCASTER_BUILD_TUI=ON \
+  -DHEXCASTER_BUILD_LV2=ON \
+  -DHEXCASTER_BUILD_CLAP=ON \
+  -DHEXCASTER_BUILD_TESTS=ON
+
+cmake --build build --parallel "$(nproc)"
+ln -sf build/compile_commands.json compile_commands.json
+```
+
+If LV2 headers are unavailable, CMake warns and skips the LV2 target.
 
 ### macOS (CLAP plugin for Reaper)
 
@@ -51,7 +138,7 @@ cmake -S . -B build \
   -DHEXCASTER_BUILD_TUI=OFF \
   -DHEXCASTER_BUILD_TESTS=OFF
 
-cmake --build build
+cmake --build build --parallel
 ```
 
 The plugin bundle is automatically installed to `~/Library/Audio/Plug-Ins/CLAP/hexcaster.clap/` after each build. Rescan plugins in Reaper; the plugin appears as **HexCaster** under CLAP.
@@ -60,24 +147,6 @@ To generate a `compile_commands.json` for LSP/editor tooling, add `-DCMAKE_EXPOR
 
 ```sh
 ln -sf build/compile_commands.json compile_commands.json
-```
-
-### Linux (all targets)
-
-```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j$(nproc)
-```
-
-Build options (all default ON):
-
-```sh
-cmake -S . -B build \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DHEXCASTER_BUILD_LV2=ON \
-  -DHEXCASTER_BUILD_CLAP=ON \
-  -DHEXCASTER_BUILD_STANDALONE=ON \
-  -DHEXCASTER_BUILD_TESTS=ON
 ```
 
 The default Bloom implementation uses the attack/release envelope follower.
@@ -92,7 +161,7 @@ cmake -S . -B build \
 ### Build LV2 plugin (Linux)
 
 ```sh
-cmake --build build --target hexcaster_lv2 -j$(nproc)
+cmake --build build --target hexcaster_lv2 --parallel "$(nproc)"
 ```
 
 The plugin bundle is automatically installed to `~/.lv2/hexcaster.lv2/` after each build. No separate install step required during development.
@@ -102,7 +171,7 @@ To load in Reaper or another LV2 host, rescan plugins. The plugin appears as **H
 ### Build CLAP plugin
 
 ```sh
-cmake --build build --target hexcaster_clap -j$(nproc)
+cmake --build build --target hexcaster_clap --parallel "$(nproc)"
 ```
 
 On macOS the bundle is installed to `~/Library/Audio/Plug-Ins/CLAP/hexcaster.clap/`. On Linux the plugin is installed to `~/.clap/hexcaster.clap`.
@@ -110,24 +179,121 @@ On macOS the bundle is installed to `~/Library/Audio/Plug-Ins/CLAP/hexcaster.cla
 ### Build standalone runtime
 
 ```sh
-cmake --build build --target hexcaster_standalone -j$(nproc)
+cmake --build build --target hexcaster_standalone --parallel "$(nproc)"
+```
+
+The executable is `build/hosts/standalone/hexcaster` even though the CMake
+target is named `hexcaster_standalone`.
+
+### Run the standalone daemon from the build tree
+
+Run with separate input and output devices and the calibrated iRig input level:
+
+```sh
+./build/hosts/standalone/hexcaster \
+  --model /path/to/model.nam \
+  --input-device hw:CARD=V276,DEV=0 \
+  --output-device hw:CARD=sndrpihifiberry,DEV=0 \
+  --input-level-dbu 11.63 \
+  --nam-quality auto \
+  --buffer 128
+```
+
+Add `--tui` when the TUI was enabled. Device and complete CLI discovery:
+
+```sh
+./build/hosts/standalone/hexcaster --list-devices
+./build/hosts/standalone/hexcaster --list-midi
+./build/hosts/standalone/hexcaster --help
+```
+
+With MIDI control:
+
+```sh
+./build/hosts/standalone/hexcaster \
+  --model /path/to/model.nam \
+  --input-device hw:CARD=V276,DEV=0 \
+  --output-device hw:CARD=sndrpihifiberry,DEV=0 \
+  --input-level-dbu 11.63 \
+  --midi-device hw:1,0,0 \
+  --midi-cc 7:InputGain_dB \
+  --midi-cc 1:BloomBasePre_dB \
+  --tui
+```
+
+### Debug build
+
+Use a separate directory and disable LTO so stack traces and debugger behavior
+remain straightforward:
+
+```sh
+cmake -S . -B build-debug \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+  -DHEXCASTER_ENABLE_LTO=OFF \
+  -DHEXCASTER_BUILD_STANDALONE=ON \
+  -DHEXCASTER_BUILD_TUI=ON \
+  -DHEXCASTER_BUILD_LV2=OFF \
+  -DHEXCASTER_BUILD_CLAP=OFF \
+  -DHEXCASTER_BUILD_TESTS=ON
+
+cmake --build build-debug --parallel "$(nproc)"
+ctest --test-dir build-debug --output-on-failure
+```
+
+Run under GDB on Linux/Pi:
+
+```sh
+gdb --args ./build-debug/hosts/standalone/hexcaster \
+  --model /path/to/model.nam \
+  --input-device hw:CARD=V276,DEV=0 \
+  --output-device hw:CARD=sndrpihifiberry,DEV=0 \
+  --input-level-dbu 11.63 \
+  --buffer 128
+```
+
+Inside GDB, use `run`, then `thread apply all bt` after a crash or interrupt.
+Debugging can disturb realtime scheduling, so xrun behavior under GDB is not a
+valid production-performance measurement.
+
+To build CLAP with the internal DSP debug output channels:
+
+```sh
+cmake -S . -B build-debug-clap \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DHEXCASTER_DEBUG_CHANNELS=ON \
+  -DHEXCASTER_BUILD_CLAP=ON \
+  -DHEXCASTER_BUILD_LV2=OFF \
+  -DHEXCASTER_BUILD_STANDALONE=OFF \
+  -DHEXCASTER_BUILD_TESTS=OFF
+cmake --build build-debug-clap --target hexcaster_clap --parallel
+```
+
+### Run tests
+
+Build and run all registered tests:
+
+```sh
+cmake --build build --target \
+  hexcaster_tests hexcaster_input_gain_tests hexcaster_nam_a2_tests \
+  --parallel "$(nproc)"
+ctest --test-dir build --output-on-failure
+```
+
+List tests or run one group:
+
+```sh
+ctest --test-dir build --show-only
+ctest --test-dir build -R input_gain_calibration --output-on-failure
+ctest --test-dir build -R nam_a2 --output-on-failure
 ```
 
 ### Install as a Raspberry Pi system service
 
-Configure a Pi production build with a system prefix, then build and install:
+After configuring `build-pi` with `CMAKE_INSTALL_PREFIX=/usr` as shown above,
+install and enable the service:
 
 ```sh
-cmake -S . -B build-pi \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_INSTALL_PREFIX=/usr \
-  -DHEXCASTER_BUILD_STANDALONE=ON \
-  -DHEXCASTER_BUILD_TUI=OFF \
-  -DHEXCASTER_BUILD_LV2=OFF \
-  -DHEXCASTER_BUILD_CLAP=OFF \
-  -DHEXCASTER_BUILD_TESTS=OFF
-
-cmake --build build-pi -j$(nproc)
 sudo cmake --build build-pi --target install-pi
 ```
 
@@ -153,85 +319,99 @@ systemctl status hexcaster
 journalctl -u hexcaster -f
 ```
 
+To run the daemon manually on the Pi, stop the service first so it releases the
+ALSA devices, then use the same arguments recorded in the unit/environment:
+
+```sh
+sudo systemctl stop hexcaster
+/usr/bin/hexcaster --help
+sudo systemctl start hexcaster
+```
+
+After rebuilding, update the installed daemon and restart it with:
+
+```sh
+cmake --build build-pi --parallel "$(nproc)"
+ctest --test-dir build-pi --output-on-failure
+sudo cmake --install build-pi --component hexcaster-runtime
+sudo systemctl restart hexcaster
+sudo systemctl status hexcaster --no-pager
+```
+
+`cmake --install ... --component hexcaster-runtime` updates installed files but
+does not run `systemd-sysusers`, enable the unit, or restart the service. Use
+`install-pi` for first installation and the component install for updates.
+
 Use stable ALSA card names such as `hw:CARD=V276,DEV=0` in the environment
 file; numeric `hw:2,0` identifiers can change across boots. The daemon runs as
 an isolated service account with audio-group access, `SCHED_FIFO` permission,
 automatic failure restart, locked-memory allowance, and a read-only system
 filesystem.
 
-Run with a NAM model:
+### Normal CMake install and staging
 
-```sh
-./build/hosts/standalone/hexcaster_standalone \
-  --model /path/to/model.nam \
-  --device hw:2,0 \
-  --nam-quality auto \
-  --buffer 128
-```
-
-Separate input and output devices:
-
-```sh
-./build/hosts/standalone/hexcaster_standalone \
-  --model /path/to/model.nam \
-  --input-device hw:2,0 \
-  --output-device hw:3,0
-```
-
-With MIDI CC control:
-
-```sh
-./build/hosts/standalone/hexcaster_standalone \
-  --model /path/to/model.nam \
-  --input-device hw:CARD=V276,DEV=0 \
-  --output-device hw:CARD=sndrpihifiberry,DEV=0 \
-  --midi-device hw:1,0,0 \
-  --midi-cc 7:InputGain_dB \
-  --midi-cc 1:BloomBasePre_dB
-```
-
-List available ALSA audio devices:
-
-```sh
-./build/hosts/standalone/hexcaster_standalone --list-devices
-```
-
-List available ALSA MIDI devices:
-
-```sh
-./build/hosts/standalone/hexcaster_standalone --list-midi
-```
-
-See all options:
-
-```sh
-./build/hosts/standalone/hexcaster_standalone --help
-```
-
-### Build everything
-
-```sh
-cmake --build build -j$(nproc)
-```
-
-### Run tests
-
-```sh
-cmake --build build --target hexcaster_tests -j$(nproc)
-ctest --test-dir build --output-on-failure
-```
-
-Or run the test binary directly:
-
-```sh
-./build/tests/hexcaster_tests
-```
-
-### Install LV2 bundle manually
+Install all enabled installable targets using the configured prefix:
 
 ```sh
 cmake --install build
 ```
+
+To select a writable non-system prefix at install time:
+
+```sh
+cmake --install build --prefix "$PWD/install-root"
+```
+
+Preview installation into a staging root without modifying the host system:
+
+```sh
+DESTDIR="$PWD/stage" cmake --install build
+```
+
+LV2 and CLAP development targets also copy themselves to the current user's
+plugin directory as a post-build step. This is separate from Pi daemon
+installation.
+
+### Clean and reconfigure
+
+Remove compiled outputs while retaining the configured build tree and fetched
+dependencies:
+
+```sh
+cmake --build build --target clean
+cmake --build build-pi --target clean
+cmake --build build-debug --target clean
+```
+
+To force a completely fresh configure, remove only the explicit build
+directory and recreate it:
+
+```sh
+rm -rf -- build
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+```
+
+The CMake `clean` target does not remove LV2/CLAP copies previously placed in
+user plugin directories. Remove only the HexCaster development copies with:
+
+```sh
+cmake -E remove_directory "$HOME/.lv2/hexcaster.lv2"
+cmake -E remove -f "$HOME/.clap/hexcaster.clap"
+```
+
+On macOS:
+
+```sh
+cmake -E remove_directory \
+  "$HOME/Library/Audio/Plug-Ins/CLAP/hexcaster.clap"
+```
+
+There is currently no CMake uninstall target for the Pi service. Installed
+production files should be managed explicitly or by a future OS package.
+
+Never run the recursive removal command with an empty variable, wildcard,
+repository root, or home directory. Build directory names in this README are
+deliberately explicit.
 
 ## Loading a NAM Model
 
@@ -273,11 +453,11 @@ Input
   → Noise Gate
   → Detector HPF (envelope path only)
   → Envelope Follower
-  → Input Gain (fixed)
+  → Model Calibration + User Input Trim
   → Pre-Gain Modulation (Bloom)
   → Neural Amp Model (NAM)
   → Post-Gain Compensation (Bloom)
-  → Post EQ (mid-sweep tone shaping)
+  → Post EQ (high/low shelf tone shaping)
   → Master Volume (fixed)
   → Output → Power Amp → Guitar Cabinet
 ```
