@@ -314,11 +314,11 @@ int main(int argc, char** argv)
     // -------------------------------------------------------------------------
 
     hexcaster::ParamRegistry params;
+    params.set(hexcaster::ParamId::MasterVolume_dB,       args.masterVolumeDb);
     params.set(hexcaster::ParamId::InputGain_dB,          args.gainDb);
     params.set(hexcaster::ParamId::NoiseGateThreshold_dB, args.gateThresholdDb);
     params.set(hexcaster::ParamId::HighShelfGain_dB,      args.eqHighShelfGainDb);
     params.set(hexcaster::ParamId::LowShelfGain_dB,       args.eqLowShelfGainDb);
-    params.set(hexcaster::ParamId::MasterVolume_dB,       args.masterVolumeDb);
     params.set(hexcaster::ParamId::BloomDepth_dB,          args.bloomDepth);
     params.set(hexcaster::ParamId::BloomCompensation,     args.bloomCompensation);
 
@@ -336,7 +336,7 @@ int main(int argc, char** argv)
             {"BloomCompensation",     hexcaster::ParamId::BloomCompensation},
             {"BloomAttackMs",         hexcaster::ParamId::BloomAttackMs},
             {"BloomReleaseMs",        hexcaster::ParamId::BloomReleaseMs},
-            {"BloomSensitivity_dB",      hexcaster::ParamId::BloomSensitivity_dB},
+            {"BloomSensitivity_dB",   hexcaster::ParamId::BloomSensitivity_dB},
             {"NoiseGateThreshold_dB", hexcaster::ParamId::NoiseGateThreshold_dB},
             {"NoiseGateAttackMs",     hexcaster::ParamId::NoiseGateAttackMs},
             {"NoiseGateReleaseMs",    hexcaster::ParamId::NoiseGateReleaseMs},
