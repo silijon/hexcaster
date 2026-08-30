@@ -37,8 +37,13 @@ bool MidiMap::dispatch(uint8_t ccNumber, uint8_t value, ParamRegistry& registry)
     const ParamId id = static_cast<ParamId>(raw);
 
     const auto range = registry.getRange(id);
-    const float paramValue = id == ParamId::InputGain_dB
-        ? inputTrimDbFromMidiCc(value, range.min, range.max)
+    const bool centeredAtDefault =
+        id == ParamId::InputGain_dB ||
+        id == ParamId::HighShelfGain_dB ||
+        id == ParamId::LowShelfGain_dB;
+    const float paramValue = centeredAtDefault
+        ? centeredValueFromMidiCc(value, range.min,
+                                  ParamRegistry::getDefault(id), range.max)
         : range.min + (static_cast<float>(value) / 127.f) * (range.max - range.min);
 
     registry.set(id, paramValue);

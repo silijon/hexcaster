@@ -38,6 +38,22 @@ int main()
     midi.dispatch(7, 127, params);
     ok &= near(params.get(hexcaster::ParamId::InputGain_dB), 12.f);
 
+    midi.map(8, hexcaster::ParamId::HighShelfGain_dB);
+    midi.dispatch(8, 0, params);
+    ok &= near(params.get(hexcaster::ParamId::HighShelfGain_dB), -32.f);
+    midi.dispatch(8, 64, params);
+    ok &= params.get(hexcaster::ParamId::HighShelfGain_dB) == -16.2f;
+    midi.dispatch(8, 127, params);
+    ok &= near(params.get(hexcaster::ParamId::HighShelfGain_dB), 12.f);
+
+    midi.map(9, hexcaster::ParamId::LowShelfGain_dB);
+    midi.dispatch(9, 0, params);
+    ok &= near(params.get(hexcaster::ParamId::LowShelfGain_dB), -32.f);
+    midi.dispatch(9, 64, params);
+    ok &= params.get(hexcaster::ParamId::LowShelfGain_dB) == 4.f;
+    midi.dispatch(9, 127, params);
+    ok &= near(params.get(hexcaster::ParamId::LowShelfGain_dB), 12.f);
+
     CalibrationProbe model;
     model.SetAudioInputLevelDBu(11.63f);
     model.setModelInputLevel(8.f);
