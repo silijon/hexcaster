@@ -80,6 +80,15 @@ cmake -S . -B build \
   -DHEXCASTER_BUILD_TESTS=ON
 ```
 
+The default Bloom implementation uses the attack/release envelope follower.
+To build with the experimental chord-score power-curve envelope instead:
+
+```sh
+cmake -S . -B build \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DHEXCASTER_EXPERIMENTAL_BLOOM=ON
+```
+
 ### Build LV2 plugin (Linux)
 
 ```sh

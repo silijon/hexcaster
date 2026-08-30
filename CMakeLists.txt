@@ -32,6 +32,7 @@ option(HEXCASTER_BUILD_TUI        "Build TUI for standalone"   ON)
 option(HEXCASTER_DEBUG_CHANNELS   "CLAP: expose internal DSP signals on extra output channels" OFF)
 option(HEXCASTER_OPTIMIZE_RPI5    "Use Cortex-A76 tuning for Raspberry Pi 5 ARM64 builds" ON)
 option(HEXCASTER_ENABLE_LTO       "Enable interprocedural optimization in Release builds" ON)
+option(HEXCASTER_EXPERIMENTAL_BLOOM "Use the experimental chord-score Bloom envelope" OFF)
 
 if(HEXCASTER_OPTIMIZE_RPI5 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
   add_compile_options($<$<CONFIG:Release>:-mcpu=cortex-a76>)

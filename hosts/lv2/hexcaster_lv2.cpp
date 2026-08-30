@@ -228,7 +228,6 @@ static void run(LV2_Handle instance, uint32_t sampleCount)
     self->bloom.setAttackMs    (self->params.get(hexcaster::ParamId::BloomAttackMs));
     self->bloom.setReleaseMs   (self->params.get(hexcaster::ParamId::BloomReleaseMs));
     self->bloom.setSensitivity       (self->params.get(hexcaster::ParamId::BloomSensitivity_dB));
-    self->bloom.setActivityThreshold (self->params.get(hexcaster::ParamId::BloomActivityThreshold));
     self->eq.setHighShelfGainDb(self->params.get(hexcaster::ParamId::HighShelfGain_dB));
     self->eq.setLowShelfGainDb (self->params.get(hexcaster::ParamId::LowShelfGain_dB));
     self->masterVolume.setGainDb(self->params.get(hexcaster::ParamId::MasterVolume_dB));

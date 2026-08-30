@@ -32,6 +32,7 @@ struct MeterData {
 
     float bloomDetectorEnv     = 0.f;   // [0, 1] fast audio detector (observation atomic)
     float bloomEnvelope        = 0.f;   // [0, 1] gain envelope -- drives pre/post gains
+    float bloomChordScore      = 0.f;   // [0, 1] peak/slope chord estimate
     float bloomBasePre         = 0.f;   // dB (base offset param)
     float bloomBasePost        = 0.f;   // dB (base offset param)
     float bloomPreGainApplied  = 0.f;   // dB -- actual gain set on bloomPreGain stage this block
@@ -41,8 +42,6 @@ struct MeterData {
     float bloomSensitivity   = 0.f; // dB
     float bloomAttack        = 0.f; // ms
     float bloomRelease       = 0.f; // ms
-    float harmonicActivity   = 0.f; // EMA of |delta(smoothedDet)|
-    int   bloomMode          = 0;   // 0 = Shaped, 1 = Tracking, 2 = Adaptive
 
     float eqHighShelfGain    = 0.f; // dB
     float eqLowShelfGain     = 0.f; // Hz

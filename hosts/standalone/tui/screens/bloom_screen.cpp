@@ -23,18 +23,10 @@ std::vector<MeterDesc> buildBloomScreenMeters()
             [](const MeterData& d) { return d.bloomEnvelope; },
             ""),
 
-        // Harmonic activity: EMA of squared |delta(smoothedDet)|, scaled.
-        // High = complex harmonic content (chords). Low = single note / silence.
-        // Visible in all modes. Squaring exaggerates the chord/note difference.
-        // Values are already in [0, 1] range after kActivityScale is applied.
-        MeterDesc::fromObservation("Activity",
-            [](const MeterData& d) { return d.harmonicActivity; },
+        // Peak/slope estimate used by the experimental Bloom envelope path.
+        MeterDesc::fromObservation("Chord",
+            [](const MeterData& d) { return d.bloomChordScore; },
             ""),
-
-        // Activity threshold (Adaptive mode release gate).
-        // Place this between single-note and chord activity levels.
-        // Displayed adjacent to Activity so you can tune one against the other.
-        MeterDesc::fromParam("Thresh", ParamId::BloomActivityThreshold, ""),
 
         // Applied pre/post gain: what the BloomController actually set last block.
         // Falls as envelope rises (pre) and rises (post) -- shows dynamic action.
@@ -63,19 +55,8 @@ ftxui::Element renderBloomScreen(const MeterData&              data,
 {
     using namespace ftxui;
 
-    const char* modeName = "Shaped";
-    if (data.bloomMode == 1) modeName = "Tracking";
-    else if (data.bloomMode == 2) modeName = "Adaptive";
-
-    auto titleRow = hbox(Elements{
-        text(" Bloom: Dynamic Gain Control") | bold,
-        text("    "),
-        text("Mode: ") | dim,
-        text(modeName) | bold | color(Color::Cyan),
-        text("  (m to toggle)") | dim,
-    });
     return vbox(Elements{
-        titleRow,
+        text(" Bloom: Dynamic Gain Control") | bold,
         text(""),
         makeMeterRow(meters, selectedIdx, data, registry, midiMap),
         text(""),

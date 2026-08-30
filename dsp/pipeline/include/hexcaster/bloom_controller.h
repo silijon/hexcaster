@@ -90,7 +90,6 @@ public:
     void setAttackMs(float ms);
     void setReleaseMs(float ms);
     void setSensitivity(float db);         // detection signal gain [0, 40] dB
-    void setActivityThreshold(float t);   // Adaptive release gate [0, 1]
 
     /**
      * Read the current gain envelope value [0.0, 1.0].
@@ -140,20 +139,11 @@ public:
 
     /**
      * Read the current chord score [0, 1].
-     * Combined peak + max-slope feature with adaptive weighting based on
+     * Combined peak + max-slope feature with dynamic weighting based on
      * inter-transient time. Drives the gain envelope decay rate. Updated
      * once per audio block. Safe to call from any thread.
      */
     float getChordScore() const;
-
-    /**
-     * Read the current harmonic activity level.
-     * EMA of |delta(smoothedDet)|. High = complex harmonic content (chords).
-     * Low = simple content or silence (single notes, quiet).
-     * Computed in all modes; used by Adaptive mode for release decisions.
-     * Safe to call from any thread (relaxed atomic load).
-     */
-    float getHarmonicActivity() const;
 
 private:
     GainStage& preGain_;
@@ -167,7 +157,6 @@ private:
     std::atomic<float>   attackMs_            { 5.f  };
     std::atomic<float>   releaseMs_           { 5.f  };
     std::atomic<float>   sensitivity_         { 5.f  }; // dB
-    std::atomic<float>   activityThreshold_   { 0.01f }; // Adaptive mode release gate [0,1]
 
     // --- Observation atomics (written by audio thread, read by TUI thread) ---
     // Updated once per block at the end of preProcess(). Relaxed ordering.
@@ -176,7 +165,6 @@ private:
     std::atomic<float> observedDetectorSlope_       { 0.f };  // last delta (tracks audio)
     std::atomic<float> observedDetectorPeak_        { 0.f };  // last peak (tracks audio)
     std::atomic<float> observedGainEnvelope_        { 0.f };  // gain envelope (drives bloom gains)
-    std::atomic<float> observedHarmonicActivity_    { 0.f };  // harmonic activity metric
     std::atomic<float> observedChordScore_          { 0.f };  // combined peak+slope chord score
 
     // --- Audio thread state ---
@@ -201,7 +189,6 @@ private:
     float detectorRawEnv_        = 0.f;    // current detector output (linear)
     float detectorSmoothCoeff_   = 0.f;    // computed once in prepare()
     float detectorSmoothEnv_     = 0.f;    // LPF-smoothed detector output
-    float prevSmoothedDet_       = 0.f;    // previous sample's smoothedDet (for delta)
     float detectorPeak_          = 0.f;    // peak value captured at release start
     float detectorSlope_         = 0.f;    // change in sample amplitude (for delta)
     float detectorMaxSlope_   = 0.f;    // max slope achieved by a note on the rising edge (for delta)
@@ -211,7 +198,7 @@ private:
     // -----------------------------------------------------------------------
     // Combined peak + slope chord score (drives gain decay rate)
     //
-    // Adaptive weighting between detPeak and detMaxSlope based on the
+    // Dynamic weighting between detPeak and detMaxSlope based on the
     // interval since the previous transient. Long intervals → trust slope
     // (dynamics-invariant). Short intervals → trust peak (slope is
     // suppressed when notes pile up). Result is rescaled by kPeakRef so
@@ -225,54 +212,26 @@ private:
     static constexpr float kChordScoreSmoothMs = 10.f;     // EMA on chord score target
 
     int   samplesSinceLastTransient_ = 0;     // counter, incremented every sample, reset at onset
-    int   lastTransientInterval_     = 0;     // captured interval at each onset (for adaptive weighting)
+    int   lastTransientInterval_     = 0;     // captured interval at each onset (for dynamic weighting)
     float chordScoreTarget_          = 0.f;   // chord score computed at end-of-attack, held until next
     float chordScoreSmoothed_        = 0.f;   // per-sample EMA of target, used by gain formula
     float chordScoreSmoothCoeff_     = 0.f;   // computed once in prepare()
 
-    // -----------------------------------------------------------------------
-    // Harmonic activity metric (computed in all modes, used by Adaptive)
-    //
-    // Running EMA of |delta(smoothedDet)|. Measures how much the detector
-    // signal is fluctuating. High = complex harmonic content (chord beating).
-    // Low = clean single-note decay or silence.
-    //
-    // In Adaptive mode, this determines release behaviour:
-    //   harmAct > threshold → track audio (chord-like, gentle release)
-    //   harmAct <= threshold → freefall at user release rate (single note)
-    // -----------------------------------------------------------------------
-    static constexpr float kActivityFollowerMs = 50.f;    // EMA time constant
-    // Squared delta scaling: brings (absDelta^2) into a [0,1] display range.
-    // absDelta for chords is ~1e-5, squared ~1e-10, * 1e9 => ~0.1 on meter.
-    // absDelta for single notes is ~1e-6, squared ~1e-12, * 1e9 => ~0.001.
-    static constexpr float kActivityScale      = 1e9f;    // scale squared delta
-    float harmonicActivity_      = 0.f;
-    float activityCoeff_         = 0.f;   // computed once in prepare()
-
-    // -----------------------------------------------------------------------
-    // Stage 2: gain envelope (parabolic decay, user BloomAttackMs / BloomReleaseMs control this)
-    // Release uses an explicit parabolic decay: detEnv = peak * (1 - t/T)^n
-    // where t is samples elapsed since release start and T is the total
-    // release duration. This is guaranteed concave: zero slope at the peak
-    // (slow plateau), steepening toward zero. Unlike any exponential variant,
-    // this directly evaluates a concave function rather than trying to reshape
-    // a convex one.
-    // -----------------------------------------------------------------------
-    // TODO: maybe make this user-controlled 1-10?
-    static constexpr float kGainCompReleasePower =   3.f;  // curve exponent (>1 for concave, higher = longer plateau)
-
-    int   gainEnvAttackCoeff_    = 0.f;     // computed once in prepare()
-    float gainEnvReleaseDur_     = 0.1f;    // total release duration in samples (set in prepare)
-    float gainEnv_               = 0.f;     // realtime gain envelope value
-    int   gainEnvReleaseSample_  = 0;       // samples elapsed since release started
-    bool  gainEnvReleasing_      = false;   // true while in release phase
+    // Stage 2: gain envelope. The default build follows the detector with
+    // user-controlled attack/release coefficients. Experimental builds use
+    // releaseMs as the shaping exponent in the chord-score power curve.
+    float gainEnv_             = 0.f;
+    float gainEnvAttackCoeff_  = 0.f;
+    float gainEnvReleaseCoeff_ = 0.f;
+    // Experimental path only: the numeric BloomReleaseMs value is reused as
+    // a dimensionless exponent in the chord-score power curve. It is not a
+    // duration or EMA coefficient in that path; larger values reshape the
+    // detector response more aggressively. The distinct name prevents it
+    // from being confused with gainEnvReleaseCoeff_, used by the default path.
+    float gainEnvReleaseShape_ = 0.1f;
 
     float cachedAttackMs_    = -1.f;
     float cachedReleaseMs_   = -1.f;
-
-    // gain envelope state machine
-    enum class GainEnvState : uint8_t { Attack, Release };
-    GainEnvState gainEnvState_ = GainEnvState::Release;
 
     void updateCoefficients();
     void computeHpfCoefficients();

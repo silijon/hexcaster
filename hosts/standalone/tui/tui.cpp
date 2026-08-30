@@ -23,13 +23,11 @@ namespace hexcaster::tui {
 Tui::Tui(std::function<MeterData()>  snapshotFn,
          ParamRegistry&              registry,
          const MidiMap&              midiMap,
-         std::atomic<bool>&          quitFlag,
-         std::function<int()>        modeToggleFn)
+         std::atomic<bool>&          quitFlag)
     : snapshotFn_(std::move(snapshotFn))
     , registry_(registry)
     , midiMap_(midiMap)
     , quitFlag_(quitFlag)
-    , modeToggleFn_(std::move(modeToggleFn))
     , screen_(ftxui::ScreenInteractive::Fullscreen())
 {
     buildScreenDefs();
@@ -141,7 +139,6 @@ ftxui::Component Tui::buildRoot()
             ftxui::text("] next  "),
             ftxui::text("Tab sel  "),
             ftxui::text("j/k adj  "),
-            ftxui::text("m bloom mode  "),
             ftxui::text("q quit"),
         }) | ftxui::dim;
 
@@ -279,12 +276,6 @@ bool Tui::handleEvent(ftxui::Event e)
     if (e == ftxui::Event::TabReverse) {
         int n = static_cast<int>(currentMeters().size());
         if (n > 0) selectedMeter_ = (selectedMeter_ + n - 1) % n;
-        return true;
-    }
-
-    // Bloom mode toggle: 'm' on the Bloom screen
-    if (e == ftxui::Event::Character('m') && currentScreen_ == 2 && modeToggleFn_) {
-        modeToggleFn_();
         return true;
     }
 

@@ -104,7 +104,6 @@ static void printUsage(const char* prog)
         "Parameter names for --midi-cc:\n"
         "  InputGain_dB         BloomBasePre_dB    BloomBasePost_dB\n"
         "  BloomDepth_dB  BloomCompensation  BloomSensitivity_dB  BloomAttackMs  BloomReleaseMs\n"
-        "  BloomActivityThreshold\n"
         "  NoiseGateThreshold_dB  NoiseGateAttackMs  NoiseGateReleaseMs  NoiseGateHoldMs\n"
         "  HighShelfHz  HighShelfGain_dB  HighShelfBw\n"
         "  LowShelfHz  LowShelfGain_dB  LowShelfBw  MasterVolume_dB\n"
@@ -338,7 +337,6 @@ int main(int argc, char** argv)
             {"BloomAttackMs",         hexcaster::ParamId::BloomAttackMs},
             {"BloomReleaseMs",        hexcaster::ParamId::BloomReleaseMs},
             {"BloomSensitivity_dB",      hexcaster::ParamId::BloomSensitivity_dB},
-            {"BloomActivityThreshold",   hexcaster::ParamId::BloomActivityThreshold},
             {"NoiseGateThreshold_dB", hexcaster::ParamId::NoiseGateThreshold_dB},
             {"NoiseGateAttackMs",     hexcaster::ParamId::NoiseGateAttackMs},
             {"NoiseGateReleaseMs",    hexcaster::ParamId::NoiseGateReleaseMs},
@@ -479,7 +477,6 @@ int main(int argc, char** argv)
         bloom.setAttackMs          (params.get(hexcaster::ParamId::BloomAttackMs));
         bloom.setReleaseMs         (params.get(hexcaster::ParamId::BloomReleaseMs));
         bloom.setSensitivity       (params.get(hexcaster::ParamId::BloomSensitivity_dB));
-        bloom.setActivityThreshold (params.get(hexcaster::ParamId::BloomActivityThreshold));
         eq.setHighShelfGainDb   (params.get(hexcaster::ParamId::HighShelfGain_dB));
         eq.setLowShelfGainDb    (params.get(hexcaster::ParamId::LowShelfGain_dB));
         masterVolume.setGainDb  (params.get(hexcaster::ParamId::MasterVolume_dB));
@@ -534,6 +531,7 @@ int main(int argc, char** argv)
             d.masterVolume         = params.get(hexcaster::ParamId::MasterVolume_dB);
             d.bloomDetectorEnv       = bloom.getDetectorEnvelope();
             d.bloomEnvelope          = bloom.getGainEnvelope();
+            d.bloomChordScore        = bloom.getChordScore();
             d.bloomBasePre           = params.get(hexcaster::ParamId::BloomBasePre_dB);
             d.bloomBasePost          = params.get(hexcaster::ParamId::BloomBasePost_dB);
             d.bloomPreGainApplied    = bloomPreGain.getGainDb();
@@ -543,7 +541,6 @@ int main(int argc, char** argv)
             d.bloomSensitivity     = params.get(hexcaster::ParamId::BloomSensitivity_dB);
             d.bloomAttack          = params.get(hexcaster::ParamId::BloomAttackMs);
             d.bloomRelease         = params.get(hexcaster::ParamId::BloomReleaseMs);
-            d.harmonicActivity     = bloom.getHarmonicActivity();
             d.eqHighShelfGain      = params.get(hexcaster::ParamId::HighShelfGain_dB);
             d.eqLowShelfGain       = params.get(hexcaster::ParamId::LowShelfGain_dB);
             d.inputLevelDb         = inputMeter.getPeakDb();

@@ -53,16 +53,11 @@ public:
      * @param midiMap        Used to mark MIDI-controlled params as read-only.
      * @param quitFlag       Shared atomic quit flag (also set by signal handler).
      *                       Tui sets it to true on 'q' keypress.
-     * @param modeToggleFn   Called when user presses 'm' on the Bloom screen.
-     *                       Should toggle the BloomMode and return the new mode
-     *                       as an int (0=Shaped, 1=Tracking). May be nullptr if
-     *                       mode toggling is not available.
      */
     Tui(std::function<MeterData()>   snapshotFn,
         ParamRegistry&               registry,
         const MidiMap&               midiMap,
-        std::atomic<bool>&           quitFlag,
-        std::function<int()>         modeToggleFn = nullptr);
+        std::atomic<bool>&           quitFlag);
 
     ~Tui();
 
@@ -78,7 +73,6 @@ private:
     ParamRegistry&             registry_;
     const MidiMap&             midiMap_;
     std::atomic<bool>&         quitFlag_;
-    std::function<int()>       modeToggleFn_;   // toggle bloom mode, returns new mode
 
     // --- FTXUI screen (owns the terminal) ---
     ftxui::ScreenInteractive   screen_;

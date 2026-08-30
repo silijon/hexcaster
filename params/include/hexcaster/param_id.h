@@ -26,7 +26,6 @@ enum class ParamId : uint32_t {
     BloomAttackMs       = 4,  // Bloom gain envelope attack time (ms)
     BloomReleaseMs      = 5,  // Bloom gain envelope release time (ms)
     BloomSensitivity_dB      = 6,  // Detection signal gain before envelope follower (dB)
-    BloomActivityThreshold   = 8,  // Adaptive mode: harmonic activity threshold [0, 1]
 
     // --- Input Gain ---
     InputGain_dB        = 30,
@@ -72,7 +71,6 @@ inline bool paramIdFromName(std::string_view name, ParamId& out)
         { "BloomAttackMs",      ParamId::BloomAttackMs      },
         { "BloomReleaseMs",     ParamId::BloomReleaseMs     },
         { "BloomSensitivity_dB",     ParamId::BloomSensitivity_dB     },
-        { "BloomActivityThreshold",  ParamId::BloomActivityThreshold  },
         { "InputGain_dB",     ParamId::InputGain_dB     },
         { "NoiseGateThreshold_dB",  ParamId::NoiseGateThreshold_dB  },
         { "NoiseGateAttackMs",      ParamId::NoiseGateAttackMs      },

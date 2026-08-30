@@ -39,3 +39,7 @@ target_link_libraries(hexcaster_pipeline
     hexcaster_components
     hexcaster_params
 )
+
+target_compile_definitions(hexcaster_pipeline PRIVATE
+  HEXCASTER_EXPERIMENTAL_BLOOM=$<BOOL:${HEXCASTER_EXPERIMENTAL_BLOOM}>
+)

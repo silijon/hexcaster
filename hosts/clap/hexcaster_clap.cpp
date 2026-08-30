@@ -57,10 +57,9 @@ static constexpr uint32_t kDbgChDetectorPeak   = 4;  // detector peak           
 static constexpr uint32_t kDbgChDetectorSlope  = 5;  // detector slope                 [-1,1]
 static constexpr uint32_t kDbgChGainEnv        = 6;  // gain envelope                  [0,1]
 static constexpr uint32_t kDbgChChordScore     = 7;  // chord score (drives gain decay) [0,1]
-static constexpr uint32_t kDbgChActivity       = 8;  // harmonic activity              [0,1]
-static constexpr uint32_t kDbgChPreDbNorm      = 9;  // bloom pre gain / 32  → [-1,1]
-static constexpr uint32_t kDbgChPostDbNorm     = 10; // bloom post gain / 32 → [-1,1]
-static constexpr uint32_t kDbgChannelCount     = 11;
+static constexpr uint32_t kDbgChPreDbNorm      = 8;  // bloom pre gain / 32  → [-1,1]
+static constexpr uint32_t kDbgChPostDbNorm     = 9;  // bloom post gain / 32 → [-1,1]
+static constexpr uint32_t kDbgChannelCount     = 10;
 #endif
 
 // Read-only meter param ids (CLAP-host-only, not in ParamRegistry)
@@ -68,7 +67,6 @@ static constexpr clap_id kMeterGainEnv       = 200;
 static constexpr clap_id kMeterDetectorEnv   = 201;
 static constexpr clap_id kMeterDetectorPeak  = 202;
 static constexpr clap_id kMeterDetectorSlope = 203;
-static constexpr clap_id kMeterActivity      = 204;
 static constexpr clap_id kMeterPreDb         = 205;
 static constexpr clap_id kMeterPostDb        = 206;
 
@@ -132,7 +130,6 @@ static constexpr ClapParamMeta kParams[] = {
     { (clap_id)hexcaster::ParamId::BloomAttackMs,         "Bloom Attack",      "Bloom",      false, false,  0.0,  0.0, 0.0 },
     { (clap_id)hexcaster::ParamId::BloomReleaseMs,        "Bloom Release",     "Bloom",      false, false,  0.0,  0.0, 0.0 },
     { (clap_id)hexcaster::ParamId::BloomSensitivity_dB,   "Bloom Sensitivity", "Bloom",      false, false,  0.0,  0.0, 0.0 },
-    { (clap_id)hexcaster::ParamId::BloomActivityThreshold,"Bloom Activity",    "Bloom",      false, false,  0.0,  0.0, 0.0 },
     { (clap_id)hexcaster::ParamId::HighShelfGain_dB,      "High Shelf Gain",   "EQ",         false, false,  0.0,  0.0, 0.0 },
     { (clap_id)hexcaster::ParamId::LowShelfGain_dB,       "Low Shelf Gain",    "EQ",         false, false,  0.0,  0.0, 0.0 },
     { (clap_id)hexcaster::ParamId::MasterVolume_dB,       "Master Volume",     "Output",     false, false,  0.0,  0.0, 0.0 },
@@ -143,7 +140,6 @@ static constexpr ClapParamMeta kParams[] = {
     { kMeterDetectorEnv,   "Detector Envelope", "Meters",  false, true,  0.0,   1.0, 0.0 },
     { kMeterDetectorPeak,  "Detector Peak",     "Meters",  false, true,  0.0,   1.0, 0.0 },
     { kMeterDetectorSlope, "Detector Slope",    "Meters",  false, true, -1.0,   1.0, 0.0 },
-    { kMeterActivity,      "Harmonic Activity", "Meters",  false, true,  0.0,   1.0, 0.0 },
     { kMeterPreDb,         "Pre Gain Applied",  "Meters",  false, true, -60.0, 32.0, 0.0 },
     { kMeterPostDb,        "Post Gain Applied", "Meters",  false, true, -60.0, 32.0, 0.0 },
 };
@@ -191,7 +187,6 @@ struct HexCasterCLAP {
     float prevMeterDetEnv_   = 0.f;
     float prevMeterDetPeak_  = 0.f;
     float prevMeterDetSlope_ = 0.f;
-    float prevMeterActivity_ = 0.f;
     float prevMeterPreDb_    = 0.f;
     float prevMeterPostDb_   = 0.f;
 
@@ -249,7 +244,6 @@ struct HexCasterCLAP {
         bloom.setAttackMs         (params.get(P::BloomAttackMs));
         bloom.setReleaseMs        (params.get(P::BloomReleaseMs));
         bloom.setSensitivity      (params.get(P::BloomSensitivity_dB));
-        bloom.setActivityThreshold(params.get(P::BloomActivityThreshold));
 
         eq.setHighShelfGainDb(params.get(P::HighShelfGain_dB));
         eq.setLowShelfGainDb (params.get(P::LowShelfGain_dB));
@@ -352,7 +346,6 @@ static clap_process_status plugin_process(const clap_plugin_t*  plugin,
     fillChannel(kDbgChDetectorSlope, self->bloom.getDetectorSlope());
     fillChannel(kDbgChGainEnv,       self->bloom.getGainEnvelope());
     fillChannel(kDbgChChordScore,    self->bloom.getChordScore());
-    // fillChannel(kDbgChActivity,     self->bloom.getHarmonicActivity());
     // fillChannel(kDbgChPreDbNorm,    self->bloomPreGain.getGainDb()  / 32.f);
     // fillChannel(kDbgChPostDbNorm,   self->bloomPostGain.getGainDb() / 32.f);
 #endif
@@ -378,7 +371,6 @@ static clap_process_status plugin_process(const clap_plugin_t*  plugin,
     pushMeter(kMeterDetectorEnv,   self->prevMeterDetEnv_,   self->bloom.getDetectorEnvelope());
     pushMeter(kMeterDetectorPeak,  self->prevMeterDetPeak_,  self->bloom.getDetectorPeak());
     pushMeter(kMeterDetectorSlope, self->prevMeterDetSlope_, self->bloom.getDetectorSlope());
-    pushMeter(kMeterActivity,      self->prevMeterActivity_, self->bloom.getHarmonicActivity());
     pushMeter(kMeterPreDb,         self->prevMeterPreDb_,    self->bloomPreGain.getGainDb());
     pushMeter(kMeterPostDb,        self->prevMeterPostDb_,   self->bloomPostGain.getGainDb());
 
@@ -487,7 +479,6 @@ static bool params_get_value(const clap_plugin_t* plugin,
     if (paramId == kMeterDetectorEnv)   { *value = self->prevMeterDetEnv_;     return true; }
     if (paramId == kMeterDetectorPeak)  { *value = self->prevMeterDetPeak_;     return true; }
     if (paramId == kMeterDetectorSlope) { *value = self->prevMeterDetSlope_;     return true; }
-    if (paramId == kMeterActivity)      { *value = self->prevMeterActivity_;   return true; }
     if (paramId == kMeterPreDb)         { *value = self->prevMeterPreDb_;      return true; }
     if (paramId == kMeterPostDb)        { *value = self->prevMeterPostDb_;     return true; }
 
