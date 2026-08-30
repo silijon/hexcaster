@@ -1,4 +1,5 @@
 #include "hexcaster/midi_map.h"
+#include "hexcaster/input_gain.h"
 #include "hexcaster/param_registry.h"
 
 #include <cstring>
@@ -35,10 +36,10 @@ bool MidiMap::dispatch(uint8_t ccNumber, uint8_t value, ParamRegistry& registry)
 
     const ParamId id = static_cast<ParamId>(raw);
 
-    // Scale raw MIDI [0, 127] linearly to the parameter's [min, max] range.
     const auto range = registry.getRange(id);
-    const float t = static_cast<float>(value) / 127.f;
-    const float paramValue = range.min + t * (range.max - range.min);
+    const float paramValue = id == ParamId::InputGain_dB
+        ? inputTrimDbFromMidiCc(value, range.min, range.max)
+        : range.min + (static_cast<float>(value) / 127.f) * (range.max - range.min);
 
     registry.set(id, paramValue);
     return true;

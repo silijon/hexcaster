@@ -16,8 +16,13 @@ std::vector<MeterDesc> buildMainScreenMeters()
         // Gate threshold: registry param (dB)
         MeterDesc::fromParam("Threshold", ParamId::NoiseGateThreshold_dB, " dB"),
 
-        // Input gain: registry param (dB)
-        MeterDesc::fromParam("In Gain", ParamId::InputGain_dB, " dB"),
+        MeterDesc::fromParam("In Trim", ParamId::InputGain_dB, " dB"),
+
+        MeterDesc::fromObservationRanged("NAM Cal",
+            [](const MeterData& d) { return d.modelCalibration; }, -24.f, 24.f, " dB"),
+
+        MeterDesc::fromObservationRanged("NAM In",
+            [](const MeterData& d) { return d.effectiveInputGain; }, -36.f, 36.f, " dB"),
 
         // Master volume: registry param (dB)
         MeterDesc::fromParam("Out Vol", ParamId::MasterVolume_dB, " dB"),

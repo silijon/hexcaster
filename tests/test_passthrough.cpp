@@ -97,19 +97,19 @@ static void testParamRegistry()
 {
     hexcaster::ParamRegistry registry;
 
-    // Default input gain matches the product's current safe input trim.
+    // Default input trim is model-reference level.
     const float def = registry.get(hexcaster::ParamId::InputGain_dB);
-    CHECK(std::fabs(def - (-10.f)) < 1e-6f, "Default InputGain_dB is not -10 dB");
+    CHECK(std::fabs(def) < 1e-6f, "Default InputGain_dB is not 0 dB");
 
     // Set and retrieve
     registry.set(hexcaster::ParamId::InputGain_dB, 12.f);
     const float val = registry.get(hexcaster::ParamId::InputGain_dB);
     CHECK(std::fabs(val - 12.f) < 1e-6f, "InputGain_dB not stored correctly");
 
-    // Out-of-range clamp (max is 24 dB)
+    // Out-of-range clamp (max is 12 dB)
     registry.set(hexcaster::ParamId::InputGain_dB, 999.f);
     const float clamped = registry.get(hexcaster::ParamId::InputGain_dB);
-    CHECK(clamped <= 24.f, "InputGain_dB not clamped to max");
+    CHECK(std::fabs(clamped - 12.f) < 1e-6f, "InputGain_dB not clamped to max");
 
     std::printf("testParamRegistry:     %s\n", gFailures == 0 ? "PASS" : "FAIL");
 }

@@ -6,7 +6,7 @@
  * Port layout:
  *   0 -- Audio In       (lv2:AudioPort,   lv2:InputPort)
  *   1 -- Audio Out      (lv2:AudioPort,   lv2:OutputPort)
- *   2 -- Input Gain dB  (lv2:ControlPort, lv2:InputPort)  [-60, +24], default 0
+ *   2 -- Input Trim dB  (lv2:ControlPort, lv2:InputPort)  [-12, +12], default 0
  *   3 -- Model Reload   (lv2:ControlPort, lv2:InputPort)  [0, 1], default 0
  *                       Toggle from 0 -> 1 to trigger model load.
  *

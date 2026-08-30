@@ -20,6 +20,12 @@ struct NamModelInfo {
     float selectedQuality = 1.f;
     float sampleRate = 0.f;
     int receptiveField = -1;
+    float interfaceInputLevelDBu = 11.63f;
+    float modelInputLevelDBu = 0.f;
+    // Automatic adjustment from NeuralAudio. This remains a separate field so
+    // a future per-model manual override can be layered on without reparsing.
+    float inputCalibrationDb = 0.f;
+    bool hasInputCalibrationMetadata = false;
 };
 
 const char* namModelVariantName(NamModelVariant variant) noexcept;
@@ -38,6 +44,7 @@ public:
     // Construction, JSON parsing and prewarming occur here, off the RT thread.
     bool loadModel(const std::string& path,
                    NamQualityPolicy quality = NamQualityPolicy::Auto);
+    void setInterfaceInputLevelDBu(float levelDBu) noexcept;
     void unloadModel();
     bool hasModel() const noexcept;
     std::string modelPath() const;
@@ -52,6 +59,7 @@ private:
     std::vector<float> outputBuffer_;
     int maxBlockSize_ = 0;
     float sampleRate_ = 0.f;
+    float interfaceInputLevelDBu_ = 11.63f;
 
     void applyPendingModel() noexcept;
     void reclaimRetiredModels();

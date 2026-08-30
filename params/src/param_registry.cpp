@@ -25,8 +25,8 @@ ParamRegistry::kParamInfo = []() {
     info[idx(ParamId::BloomReleaseMs)]    = { 3.f,  0.5f, 10.f };
     info[idx(ParamId::BloomSensitivity_dB)]     = { 5.f,  0.f,  20.f };
 
-    // Input Gain
-    info[idx(ParamId::InputGain_dB)]     = {   -10.f, -60.f,   24.f };
+    // Model-relative input trim. MIDI CC 64 is exactly 0 dB/reference level.
+    info[idx(ParamId::InputGain_dB)]     = { 0.f, -12.f, 12.f };
 
     // Noise Gate
     info[idx(ParamId::NoiseGateThreshold_dB)] = { -60.f, -80.f,   0.f };

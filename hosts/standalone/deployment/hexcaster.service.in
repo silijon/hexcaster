@@ -17,11 +17,12 @@ Environment=HEXCASTER_INPUT=hw:CARD=V276,DEV=0
 Environment=HEXCASTER_OUTPUT=hw:CARD=sndrpihifiberry,DEV=0
 Environment=HEXCASTER_QUALITY=auto
 Environment=HEXCASTER_BUFFER=128
+Environment=HEXCASTER_INPUT_LEVEL_DBU=11.63
 Environment=HEXCASTER_EXTRA_ARGS=
 EnvironmentFile=-@CMAKE_INSTALL_FULL_SYSCONFDIR@/hexcaster/hexcaster.env
 
 ExecStartPre=/usr/bin/test -r ${HEXCASTER_MODEL}
-ExecStart=@CMAKE_INSTALL_FULL_BINDIR@/hexcaster --model ${HEXCASTER_MODEL} --input-device ${HEXCASTER_INPUT} --output-device ${HEXCASTER_OUTPUT} --nam-quality ${HEXCASTER_QUALITY} --buffer ${HEXCASTER_BUFFER} $HEXCASTER_EXTRA_ARGS
+ExecStart=@CMAKE_INSTALL_FULL_BINDIR@/hexcaster --model ${HEXCASTER_MODEL} --input-device ${HEXCASTER_INPUT} --output-device ${HEXCASTER_OUTPUT} --input-level-dbu ${HEXCASTER_INPUT_LEVEL_DBU} --nam-quality ${HEXCASTER_QUALITY} --buffer ${HEXCASTER_BUFFER} $HEXCASTER_EXTRA_ARGS
 Restart=on-failure
 RestartSec=2
 TimeoutStopSec=5

@@ -27,7 +27,7 @@ enum class ParamId : uint32_t {
     BloomReleaseMs      = 5,  // Bloom gain envelope release time (ms)
     BloomSensitivity_dB      = 6,  // Detection signal gain before envelope follower (dB)
 
-    // --- Input Gain ---
+    // --- Model-relative Input Trim (0 dB = NAM capture reference) ---
     InputGain_dB        = 30,
 
     // --- Noise Gate ---

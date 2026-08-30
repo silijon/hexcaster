@@ -122,7 +122,7 @@ static constexpr ClapParamMeta kParams[] = {
     { (clap_id)hexcaster::ParamId::NoiseGateAttackMs,     "Gate Attack",       "Noise Gate", false, false,  0.0,  0.0, 0.0 },
     { (clap_id)hexcaster::ParamId::NoiseGateReleaseMs,    "Gate Release",      "Noise Gate", false, false,  0.0,  0.0, 0.0 },
     { (clap_id)hexcaster::ParamId::NoiseGateHoldMs,       "Gate Hold",         "Noise Gate", false, false,  0.0,  0.0, 0.0 },
-    { (clap_id)hexcaster::ParamId::InputGain_dB,          "Input Gain",        "Input",      false, false,  0.0,  0.0, 0.0 },
+    { (clap_id)hexcaster::ParamId::InputGain_dB,          "Input Trim",        "Input",      false, false,  0.0,  0.0, 0.0 },
     { (clap_id)hexcaster::ParamId::BloomBasePre_dB,       "Bloom Pre Gain",    "Bloom",      false, false,  0.0,  0.0, 0.0 },
     { (clap_id)hexcaster::ParamId::BloomBasePost_dB,      "Bloom Post Gain",   "Bloom",      false, false,  0.0,  0.0, 0.0 },
     { (clap_id)hexcaster::ParamId::BloomDepth_dB,         "Bloom Depth",       "Bloom",      false, false,  0.0,  0.0, 0.0 },

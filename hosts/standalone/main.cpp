@@ -11,6 +11,7 @@
 #include "hexcaster/param_registry.h"
 #include "hexcaster/midi_map.h"
 #include "hexcaster/param_id.h"
+#include "hexcaster/input_gain.h"
 
     bool runtimeFailed = false;
 
@@ -61,6 +62,7 @@ struct Args {
     unsigned int sampleRate     = 48000;
     unsigned int bufferFrames   = 128;
     float        gainDb                = 0.f;
+    float        inputLevelDBu         = hexcaster::kDefaultInterfaceInputLevelDBu;
     float        gateThresholdDb      = -60.f;
     float        eqHighShelfGainDb    = -16.2f;
     float        eqLowShelfGainDb     = 4.0f;
@@ -88,7 +90,8 @@ static void printUsage(const char* prog)
         "  --output-device <dev>       Output audio device\n"
         "  --sample-rate <Hz>          Sample rate  [default: 48000]\n"
         "  --buffer <frames>           Buffer size in frames  [default: 128]\n"
-        "  --gain <dB>                 Initial input gain in dB  [default: 0.0]\n"
+        "  --gain <dB>                 Initial model-relative input trim  [-12, +12] dB  [0]\n"
+        "  --input-level-dbu <dBu>     Capture-interface level at 0 dBFS  [default: 11.63]\n"
         "  --gate-threshold <dB>       Noise gate threshold  [-80, 0] dB  [default: -60]\n"
         "  --high-shelf-gain <dB>      High-shelf EQ gain  [-32, +12] dB  [default: -16.2]\n"
         "  --low-shelf-gain <dB>       Low-shelf EQ gain  [-32, +12] dB  [default: 4.0]\n"
@@ -204,6 +207,9 @@ static bool parseArgs(int argc, char** argv, Args& args)
         } else if (std::strcmp(key, "--gain") == 0) {
             const char* v = nextArg(); if (!v) return false;
             args.gainDb = static_cast<float>(std::atof(v));
+        } else if (std::strcmp(key, "--input-level-dbu") == 0) {
+            const char* v = nextArg(); if (!v) return false;
+            args.inputLevelDBu = static_cast<float>(std::atof(v));
         } else if (std::strcmp(key, "--gate-threshold") == 0) {
             const char* v = nextArg(); if (!v) return false;
             args.gateThresholdDb = static_cast<float>(std::atof(v));
@@ -370,6 +376,7 @@ int main(int argc, char** argv)
     hexcaster::GainStage bloomPostGain;  // controlled by BloomController
 
     hexcaster::NamStage nam;
+    nam.setInterfaceInputLevelDBu(args.inputLevelDBu);
 
     hexcaster::ShelfEQ eq;
     eq.setHighShelfGainDb(args.eqHighShelfGainDb);
@@ -387,9 +394,9 @@ int main(int argc, char** argv)
 
     hexcaster::Pipeline pipeline;
     pipeline.addStage(&noiseGate);      // stage 0: noise gate
-    pipeline.addStage(&inputGain);      // stage 1: input gain (user)
+    pipeline.addStage(&inputGain);      // stage 1: model-relative user input trim
     pipeline.addStage(&bloomPreGain);   // stage 2: bloom pre-gain (dynamic)
-    pipeline.addStage(&nam);            // stage 3: amp model
+    pipeline.addStage(&nam);            // stage 3: model calibration + amp model
     pipeline.addStage(&bloomPostGain);  // stage 4: bloom post-gain (dynamic)
     pipeline.addStage(&eq);             // stage 5: post-NAM EQ
     pipeline.addStage(&masterVolume);   // stage 6: master volume (user)
@@ -424,6 +431,27 @@ int main(int argc, char** argv)
         modelInfo.path.c_str(), hexcaster::namModelVariantName(modelInfo.variant),
         modelInfo.version.c_str(), modelInfo.nativeStatic ? "NeuralAudio native" : "NAMCore/dynamic",
         modelInfo.selectedQuality, modelInfo.sampleRate);
+    const float userInputTrimDb = params.get(hexcaster::ParamId::InputGain_dB);
+    std::fprintf(stdout,
+        "NAM input calibration:\n"
+        "  interface: %+6.2f dBu\n",
+        modelInfo.interfaceInputLevelDBu);
+    if (modelInfo.hasInputCalibrationMetadata) {
+        std::fprintf(stdout, "  model:     %+6.2f dBu (metadata)\n",
+                     modelInfo.modelInputLevelDBu);
+    } else {
+        std::fprintf(stderr,
+            "Warning: NAM model has no valid input_level_dbu metadata; "
+            "using 0.00 dB automatic input calibration.\n");
+        std::fprintf(stdout, "  model:       unavailable (fallback)\n");
+    }
+    std::fprintf(stdout,
+        "  auto trim: %+6.2f dB\n"
+        "  user trim: %+6.2f dB\n"
+        "  effective: %+6.2f dB\n",
+        modelInfo.inputCalibrationDb, userInputTrimDb,
+        hexcaster::effectivePreNamGainDb(modelInfo.inputCalibrationDb,
+                                        userInputTrimDb));
 
     // -------------------------------------------------------------------------
     // Audio engine
@@ -530,6 +558,9 @@ int main(int argc, char** argv)
             d.noiseGateRelease     = params.get(hexcaster::ParamId::NoiseGateReleaseMs);
             d.noiseGateHold        = params.get(hexcaster::ParamId::NoiseGateHoldMs);
             d.inputGain            = params.get(hexcaster::ParamId::InputGain_dB);
+            d.modelCalibration     = modelInfo.inputCalibrationDb;
+            d.effectiveInputGain   = hexcaster::effectivePreNamGainDb(
+                d.modelCalibration, d.inputGain);
             d.masterVolume         = params.get(hexcaster::ParamId::MasterVolume_dB);
             d.bloomDetectorEnv       = bloom.getDetectorEnvelope();
             d.bloomEnvelope          = bloom.getGainEnvelope();

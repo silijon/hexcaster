@@ -17,6 +17,9 @@ int main(int argc, char** argv)
     auto info = nam.modelInfo();
     if (info.variant != hexcaster::NamModelVariant::A2Lite ||
         !info.nativeStatic || info.selectedQuality != 0.f) return 1;
+    // This fixture has no top-level input_level_dbu. HexCaster must not apply
+    // NeuralAudio's implicit 12 dBu model default as if it were metadata.
+    if (info.hasInputCalibrationMetadata || info.inputCalibrationDb != 0.f) return 1;
 
     std::vector<float> audio(257, 0.f);
     audio[0] = 0.1f;

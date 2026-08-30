@@ -28,6 +28,8 @@ struct MeterData {
     float noiseGateHold      = 0.f; // ms
 
     float inputGain          = 0.f; // dB
+    float modelCalibration   = 0.f; // dB, automatic NAM input adjustment
+    float effectiveInputGain = 0.f; // dB, calibration + user trim
     float masterVolume       = 0.f; // dB
 
     float bloomDetectorEnv     = 0.f;   // [0, 1] fast audio detector (observation atomic)

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 
 namespace hexcaster {
 
@@ -99,6 +100,7 @@ bool NamStage::loadModel(const std::string& path, NamQualityPolicy quality)
     if (pendingModel_.load(std::memory_order_acquire)) return false;
 
     NeuralAudio::NeuralModelLoader loader;
+    loader.SetAudioInputLevelDBu(interfaceInputLevelDBu_);
     loader.SetDefaultMaxAudioBufferSize(
         std::min(maxBlockSize_ > 0 ? maxBlockSize_ : kMaxInferenceFrames,
                  kMaxInferenceFrames));
@@ -124,16 +126,35 @@ bool NamStage::loadModel(const std::string& path, NamQualityPolicy quality)
     prepared->info.selectedQuality = raw->GetQualityScaleFactor();
     prepared->info.sampleRate = raw->GetSampleRate();
     prepared->info.receptiveField = raw->GetReceptiveFieldSize();
+    prepared->info.interfaceInputLevelDBu = interfaceInputLevelDBu_;
+
+    // NeuralAudio uses 12 dBu internally when input_level_dbu is absent. Do
+    // not mistake that library default for known capture calibration.
+    const std::string modelInputMetadata = raw->GetMetadata("input_level_dbu");
+    if (!modelInputMetadata.empty()) {
+        char* end = nullptr;
+        const float modelLevel = std::strtof(modelInputMetadata.c_str(), &end);
+        if (end != modelInputMetadata.c_str() && *end == '\0' && std::isfinite(modelLevel)) {
+            prepared->info.hasInputCalibrationMetadata = true;
+            prepared->info.modelInputLevelDBu = modelLevel;
+            prepared->info.inputCalibrationDb = raw->GetRecommendedInputDBAdjustment();
+        }
+    }
 
     if (quality == NamQualityPolicy::Lite && prepared->info.variant == NamModelVariant::A2Full) return false;
     if (quality == NamQualityPolicy::Full && prepared->info.variant == NamModelVariant::A2Lite) return false;
 
-    prepared->inputGainLinear = std::pow(10.f, raw->GetRecommendedInputDBAdjustment() / 20.f);
+    prepared->inputGainLinear = std::pow(10.f, prepared->info.inputCalibrationDb / 20.f);
     prepared->outputGainLinear = std::pow(10.f, raw->GetRecommendedOutputDBAdjustment() / 20.f);
     auto* published = prepared.get();
     ownedModels_.push_back(std::move(prepared));
     pendingModel_.store(published, std::memory_order_release);
     return true;
+}
+
+void NamStage::setInterfaceInputLevelDBu(float levelDBu) noexcept
+{
+    if (std::isfinite(levelDBu)) interfaceInputLevelDBu_ = levelDBu;
 }
 
 void NamStage::unloadModel()
