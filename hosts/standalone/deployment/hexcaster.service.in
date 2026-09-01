@@ -13,7 +13,7 @@ Group=hexcaster
 SupplementaryGroups=audio
 
 Environment=HEXCASTER_MODEL=@CMAKE_INSTALL_FULL_LOCALSTATEDIR@/lib/hexcaster/models/default.nam
-Environment=HEXCASTER_INPUT=hw:CARD=V276,DEV=0
+Environment=HEXCASTER_INPUT=hw:CARD=i2,DEV=0
 Environment=HEXCASTER_OUTPUT=hw:CARD=sndrpihifiberry,DEV=0
 Environment=HEXCASTER_QUALITY=auto
 Environment=HEXCASTER_BUFFER=128

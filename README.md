@@ -192,7 +192,7 @@ Run with separate input and output devices and the calibrated iRig input level:
 ```sh
 ./build/hosts/standalone/hexcaster \
   --model /path/to/model.nam \
-  --input-device hw:CARD=V276,DEV=0 \
+  --input-device hw:CARD=i2,DEV=0 \
   --output-device hw:CARD=sndrpihifiberry,DEV=0 \
   --input-level-dbu 11.63 \
   --nam-quality auto \
@@ -212,7 +212,7 @@ With MIDI control:
 ```sh
 ./build/hosts/standalone/hexcaster \
   --model /path/to/model.nam \
-  --input-device hw:CARD=V276,DEV=0 \
+  --input-device hw:CARD=i2,DEV=0 \
   --output-device hw:CARD=sndrpihifiberry,DEV=0 \
   --input-level-dbu 11.63 \
   --midi-device hw:1,0,0 \
@@ -246,7 +246,7 @@ Run under GDB on Linux/Pi:
 ```sh
 gdb --args ./build-debug/hosts/standalone/hexcaster \
   --model /path/to/model.nam \
-  --input-device hw:CARD=V276,DEV=0 \
+  --input-device hw:CARD=i2,DEV=0 \
   --output-device hw:CARD=sndrpihifiberry,DEV=0 \
   --input-level-dbu 11.63 \
   --buffer 128
@@ -342,7 +342,7 @@ sudo systemctl status hexcaster --no-pager
 does not run `systemd-sysusers`, enable the unit, or restart the service. Use
 `install-pi` for first installation and the component install for updates.
 
-Use stable ALSA card names such as `hw:CARD=V276,DEV=0` in the environment
+Use stable ALSA card names such as `hw:CARD=i2,DEV=0` in the environment
 file; numeric `hw:2,0` identifiers can change across boots. The daemon runs as
 an isolated service account with audio-group access, `SCHED_FIFO` permission,
 automatic failure restart, locked-memory allowance, and a read-only system

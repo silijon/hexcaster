@@ -114,10 +114,10 @@ static void printUsage(const char* prog)
         "  LowShelfHz  LowShelfGain_dB  LowShelfBw  MasterVolume_dB\n"
         "\n"
         "Examples:\n"
-        "  %s --model ~/amp.nam --input-device hw:CARD=V276,DEV=0 \\\n"
+        "  %s --model ~/amp.nam --input-device hw:CARD=i2,DEV=0 \\\n"
         "     --output-device hw:CARD=sndrpihifiberry,DEV=0\n"
         "\n"
-        "  %s --model ~/amp.nam --input-device hw:CARD=V276,DEV=0 \\\n"
+        "  %s --model ~/amp.nam --input-device hw:CARD=i2,DEV=0 \\\n"
         "     --output-device hw:CARD=sndrpihifiberry,DEV=0 \\\n"
         "     --midi-device hw:1,0,0 \\\n"
         "     --midi-cc 7:InputGain_dB --midi-cc 1:BloomBasePre_dB\n",
