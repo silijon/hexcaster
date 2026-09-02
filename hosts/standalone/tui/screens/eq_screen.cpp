@@ -23,7 +23,7 @@ ftxui::Element renderEqScreen(const MeterData&              data,
     (void)data;
 
     auto infoRow = hbox(Elements{
-        text(" Range: Gain [-32, +12] dB  |  Lo shelf @ 175 Hz  |  Hi shelf @ 4500 Hz") | dim,
+        text(" Range: Gain [-32, +12] dB  |  Lo shelf @ 175 Hz  |  Hi shelf @ 3000 Hz") | dim,
     });
     return vbox(Elements{
         text(" EQ: High + Low Shelf") | bold,

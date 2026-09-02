@@ -246,7 +246,11 @@ struct HexCasterCLAP {
         bloom.setSensitivity      (params.get(P::BloomSensitivity_dB));
 
         eq.setHighShelfGainDb(params.get(P::HighShelfGain_dB));
+        eq.setHighShelfHz    (params.get(P::HighShelfHz));
+        eq.setHighShelfBw    (params.get(P::HighShelfBw));
         eq.setLowShelfGainDb (params.get(P::LowShelfGain_dB));
+        eq.setLowShelfHz     (params.get(P::LowShelfHz));
+        eq.setLowShelfBw     (params.get(P::LowShelfBw));
 
         masterVolume.setGainDb(params.get(P::MasterVolume_dB));
     }

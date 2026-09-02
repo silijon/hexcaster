@@ -78,11 +78,11 @@ private:
  * biquad (DF2T), cascaded in series within one ProcessorStage.
  *
  * Parameters (default / range):
- *   highShelfHz     4500 Hz   [1000, 16000]   high-shelf corner frequency
- *   highShelfGainDb -16.2 dB  [-32, +12]      high-shelf boost/cut
- *   highShelfBw     1.25 oct  [0.1, 4.0]      high-shelf bandwidth (octaves)
+ *   highShelfHz     3000 Hz   [1000, 16000]   high-shelf corner frequency
+ *   highShelfGainDb 0.0 dB    [-32, +12]      high-shelf boost/cut
+ *   highShelfBw     1.5 oct   [0.1, 4.0]      high-shelf bandwidth (octaves)
  *   lowShelfHz      175 Hz    [40, 1000]      low-shelf corner frequency
- *   lowShelfGainDb  4.0 dB    [-32, +12]      low-shelf boost/cut
+ *   lowShelfGainDb  0.0 dB    [-32, +12]      low-shelf boost/cut
  *   lowShelfBw      1.5 oct   [0.1, 4.0]      low-shelf bandwidth (octaves)
  *
  * Implementation mirrors MidSweepEQ: coefficients are recomputed once per block
@@ -121,11 +121,11 @@ private:
     void updateLowShelf();
 
     // --- Atomic parameters (control thread) ---
-    std::atomic<float> highHz_  { 4500.f };
-    std::atomic<float> highGain_{ -16.2f };
-    std::atomic<float> highBw_  { 1.25f  };
+    std::atomic<float> highHz_  { 3000.f };
+    std::atomic<float> highGain_{ 0.f    };
+    std::atomic<float> highBw_  { 1.5f   };
     std::atomic<float> lowHz_   {  175.f };
-    std::atomic<float> lowGain_ {  4.0f  };
+    std::atomic<float> lowGain_ {  0.f   };
     std::atomic<float> lowBw_   {  1.5f  };
 
     // --- Audio thread state ---

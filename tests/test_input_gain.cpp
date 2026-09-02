@@ -42,7 +42,7 @@ int main()
     midi.dispatch(8, 0, params);
     ok &= near(params.get(hexcaster::ParamId::HighShelfGain_dB), -32.f);
     midi.dispatch(8, 64, params);
-    ok &= params.get(hexcaster::ParamId::HighShelfGain_dB) == -16.2f;
+    ok &= params.get(hexcaster::ParamId::HighShelfGain_dB) == 0.f;
     midi.dispatch(8, 127, params);
     ok &= near(params.get(hexcaster::ParamId::HighShelfGain_dB), 12.f);
 
@@ -50,7 +50,7 @@ int main()
     midi.dispatch(9, 0, params);
     ok &= near(params.get(hexcaster::ParamId::LowShelfGain_dB), -32.f);
     midi.dispatch(9, 64, params);
-    ok &= params.get(hexcaster::ParamId::LowShelfGain_dB) == 4.f;
+    ok &= params.get(hexcaster::ParamId::LowShelfGain_dB) == 0.f;
     midi.dispatch(9, 127, params);
     ok &= near(params.get(hexcaster::ParamId::LowShelfGain_dB), 12.f);
 

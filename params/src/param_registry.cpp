@@ -43,11 +43,11 @@ ParamRegistry::kParamInfo = []() {
     info[idx(ParamId::MasterVolume_dB)] = { 0.f, -60.f, 24.f };
 
     // Shelf EQ
-    info[idx(ParamId::HighShelfHz)]      = { 4500.f, 1000.f, 16000.f };
-    info[idx(ParamId::HighShelfGain_dB)] = {  -16.2f,  -32.f,    12.f };
-    info[idx(ParamId::HighShelfBw)]      = {   1.25f,   0.1f,     4.f };
+    info[idx(ParamId::HighShelfHz)]      = { 3000.f, 1000.f, 16000.f };
+    info[idx(ParamId::HighShelfGain_dB)] = {    0.f,  -32.f,    12.f };
+    info[idx(ParamId::HighShelfBw)]      = {    1.5f,   0.1f,     4.f };
     info[idx(ParamId::LowShelfHz)]       = {  175.f,   40.f,   1000.f };
-    info[idx(ParamId::LowShelfGain_dB)]  = {    4.f,  -32.f,     12.f };
+    info[idx(ParamId::LowShelfGain_dB)]  = {    0.f,  -32.f,     12.f };
     info[idx(ParamId::LowShelfBw)]       = {    1.5f,   0.1f,     4.f };
 
     return info;

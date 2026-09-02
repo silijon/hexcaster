@@ -64,8 +64,8 @@ struct Args {
     float        gainDb                = 0.f;
     float        inputLevelDBu         = hexcaster::kDefaultInterfaceInputLevelDBu;
     float        gateThresholdDb      = -60.f;
-    float        eqHighShelfGainDb    = -16.2f;
-    float        eqLowShelfGainDb     = 4.0f;
+    float        eqHighShelfGainDb    = 0.f;
+    float        eqLowShelfGainDb     = 0.f;
     float        masterVolumeDb       = 0.f;
     float        bloomDepth           = 6.f;
     float        bloomCompensation    = 0.5f;
@@ -93,8 +93,8 @@ static void printUsage(const char* prog)
         "  --gain <dB>                 Initial model-relative input trim  [-12, +12] dB  [0]\n"
         "  --input-level-dbu <dBu>     Capture-interface level at 0 dBFS  [default: 11.63]\n"
         "  --gate-threshold <dB>       Noise gate threshold  [-80, 0] dB  [default: -60]\n"
-        "  --high-shelf-gain <dB>      High-shelf EQ gain  [-32, +12] dB  [default: -16.2]\n"
-        "  --low-shelf-gain <dB>       Low-shelf EQ gain  [-32, +12] dB  [default: 4.0]\n"
+        "  --high-shelf-gain <dB>      High-shelf EQ gain  [-32, +12] dB  [default: 0]\n"
+        "  --low-shelf-gain <dB>       Low-shelf EQ gain  [-32, +12] dB  [default: 0]\n"
         "  --master-volume <dB>        Final output level to power amp  [-60, +24] dB  [default: 0]\n"
         "  --bloom-depth <dB>          Bloom max input gain reduction  [0, 24] dB  [default: 6]\n"
         "  --bloom-compensation <r>    Bloom output compensation ratio  [0, 2]  [default: 0.5]\n"
@@ -508,7 +508,11 @@ int main(int argc, char** argv)
         bloom.setReleaseMs         (params.get(hexcaster::ParamId::BloomReleaseMs));
         bloom.setSensitivity       (params.get(hexcaster::ParamId::BloomSensitivity_dB));
         eq.setHighShelfGainDb   (params.get(hexcaster::ParamId::HighShelfGain_dB));
+        eq.setHighShelfHz       (params.get(hexcaster::ParamId::HighShelfHz));
+        eq.setHighShelfBw       (params.get(hexcaster::ParamId::HighShelfBw));
         eq.setLowShelfGainDb    (params.get(hexcaster::ParamId::LowShelfGain_dB));
+        eq.setLowShelfHz        (params.get(hexcaster::ParamId::LowShelfHz));
+        eq.setLowShelfBw        (params.get(hexcaster::ParamId::LowShelfBw));
         masterVolume.setGainDb  (params.get(hexcaster::ParamId::MasterVolume_dB));
         inputMeter.measure(buf, n);
         pipeline.process(buf, n);

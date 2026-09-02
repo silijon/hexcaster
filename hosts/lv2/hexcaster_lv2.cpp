@@ -229,7 +229,11 @@ static void run(LV2_Handle instance, uint32_t sampleCount)
     self->bloom.setReleaseMs   (self->params.get(hexcaster::ParamId::BloomReleaseMs));
     self->bloom.setSensitivity       (self->params.get(hexcaster::ParamId::BloomSensitivity_dB));
     self->eq.setHighShelfGainDb(self->params.get(hexcaster::ParamId::HighShelfGain_dB));
+    self->eq.setHighShelfHz    (self->params.get(hexcaster::ParamId::HighShelfHz));
+    self->eq.setHighShelfBw    (self->params.get(hexcaster::ParamId::HighShelfBw));
     self->eq.setLowShelfGainDb (self->params.get(hexcaster::ParamId::LowShelfGain_dB));
+    self->eq.setLowShelfHz     (self->params.get(hexcaster::ParamId::LowShelfHz));
+    self->eq.setLowShelfBw     (self->params.get(hexcaster::ParamId::LowShelfBw));
     self->masterVolume.setGainDb(self->params.get(hexcaster::ParamId::MasterVolume_dB));
 
     // Model reload trigger: fire background load on 0 -> 1 rising edge only.
