@@ -86,8 +86,13 @@ FetchContent_Declare(
   GIT_TAG        e59cd5d473d5b5772c69e755d7c5bc1007cff9ab
   GIT_SUBMODULES deps/NeuralAmpModelerCore deps/math_approx
   GIT_SUBMODULES_RECURSE ON
-  PATCH_COMMAND  git apply --recount --whitespace=nowarn
-                 ${CMAKE_CURRENT_LIST_DIR}/patches/neuralaudio-a2-only.patch
+  # CMake 3.31 can rerun this step for an already-populated dependency, so the
+  # patch driver must tolerate a patch that is already present.
+  PATCH_COMMAND
+    ${CMAKE_COMMAND}
+      -DSOURCE_DIR=<SOURCE_DIR>
+      -DPATCH_FILE=${CMAKE_CURRENT_LIST_DIR}/patches/neuralaudio-a2-only.patch
+      -P ${CMAKE_CURRENT_LIST_DIR}/apply_patch_once.cmake
 )
 
 FetchContent_GetProperties(NeuralAudio)
