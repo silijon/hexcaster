@@ -21,9 +21,9 @@ ParamRegistry::kParamInfo = []() {
     info[idx(ParamId::BloomBasePost_dB)] = { 0.f,  -24.f, 24.f };
     info[idx(ParamId::BloomDepth_dB)]      = { 20.f,   0.f,  32.f };
     info[idx(ParamId::BloomCompensation)] = { 0.33f,  0.f,   2.f };
-    info[idx(ParamId::BloomAttackMs)]     = { 25.f,  0.1f, 500.f };
-    info[idx(ParamId::BloomReleaseMs)]    = { 3.f,  0.5f, 10.f };
-    info[idx(ParamId::BloomSensitivity_dB)]     = { 5.f,  0.f,  20.f };
+    info[idx(ParamId::BloomAttackMs)]     = { 1.f,  0.1f, 10.f };
+    info[idx(ParamId::BloomReleaseMs)]    = { 1.f,  0.1f, 10.f };
+    info[idx(ParamId::BloomSensitivity_dB)]     = { 20.f,  0.f,  40.f };
 
     // Model-relative input trim. MIDI CC 64 is exactly 0 dB/reference level.
     info[idx(ParamId::InputGain_dB)]     = { 0.f, -12.f, 12.f };

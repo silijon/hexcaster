@@ -2,6 +2,7 @@
 #include "hexcaster/input_gain.h"
 #include "hexcaster/param_registry.h"
 
+#include <cmath>
 #include <cstring>
 #include <limits>
 
@@ -41,10 +42,21 @@ bool MidiMap::dispatch(uint8_t ccNumber, uint8_t value, ParamRegistry& registry)
         id == ParamId::InputGain_dB ||
         id == ParamId::HighShelfGain_dB ||
         id == ParamId::LowShelfGain_dB;
-    const float paramValue = centeredAtDefault
-        ? centeredValueFromMidiCc(value, range.min,
-                                  ParamRegistry::getDefault(id), range.max)
-        : range.min + (static_cast<float>(value) / 127.f) * (range.max - range.min);
+    float paramValue;
+    if (id == ParamId::BloomAttackMs || id == ParamId::BloomReleaseMs) {
+        // Smooth logarithmic response over two decades: 0.1..10 ms.
+        // CC 64 is about 1.018 ms because MIDI has no exact integer midpoint.
+        constexpr float minimumMs = 0.1f;
+        constexpr float maximumMs = 10.f;
+        const float normalized = static_cast<float>(value) / 127.f;
+        paramValue = minimumMs * std::pow(maximumMs / minimumMs, normalized);
+    } else if (centeredAtDefault) {
+        paramValue = centeredValueFromMidiCc(
+            value, range.min, ParamRegistry::getDefault(id), range.max);
+    } else {
+        paramValue = range.min
+            + (static_cast<float>(value) / 127.f) * (range.max - range.min);
+    }
 
     registry.set(id, paramValue);
     return true;

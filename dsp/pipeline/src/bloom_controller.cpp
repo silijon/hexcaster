@@ -316,7 +316,7 @@ void BloomController::setAttackMs(float ms)
 
 void BloomController::setReleaseMs(float ms)
 {
-    releaseMs_.store(std::clamp(ms, 0.5f, 10.f), std::memory_order_relaxed);
+    releaseMs_.store(std::clamp(ms, 0.1f, 10.f), std::memory_order_relaxed);
 }
 
 void BloomController::setSensitivity(float db)
