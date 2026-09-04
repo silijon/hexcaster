@@ -93,6 +93,11 @@ bool AlsaAudioEngine::open(const Config& config)
     actualFrames_ = 0;
     lastAlsaError_ = 0;
     metrics_ = {};
+    ioErrorCount_.store(0, std::memory_order_relaxed);
+    liveRecoveryAttempts_.store(0, std::memory_order_relaxed);
+    liveRecoveryFailures_.store(0, std::memory_order_relaxed);
+    liveLastErrorCode_.store(0, std::memory_order_relaxed);
+    liveLastWasCapture_.store(false, std::memory_order_relaxed);
 
     if (!openHandle(config_.inputDevice, true, captureHandle_, captureChannels_,
                     captureFmt_, captureSettings_))
@@ -121,6 +126,12 @@ bool AlsaAudioEngine::open(const Config& config)
 
     actualRate_ = captureSettings_.sampleRate;
     actualFrames_ = captureSettings_.periodFrames;
+    // Waiting longer than several periods cannot preserve realtime operation;
+    // use a floor for startup/scheduler jitter while keeping all I/O bounded.
+    const uint64_t fourPeriodsMs =
+        (static_cast<uint64_t>(actualFrames_) * 4000ull + actualRate_ - 1)
+        / actualRate_;
+    ioWaitTimeoutMs_ = static_cast<int>(std::max<uint64_t>(10, fourPeriodsMs));
 
     // Pre-allocate raw interleaved buffers using actual negotiated format sizes
     const int frames = static_cast<int>(actualFrames_);
@@ -250,17 +261,26 @@ bool AlsaAudioEngine::openHandle(const std::string& device, bool isCapture,
         return false;
     }
 
-    // SW params: start when the first period is written/read
+    // SW params: start when the first period is written/read. Keeping the
+    // playback threshold at one period matches the proven original behavior
+    // and avoids coupling startup/recovery to a completely full buffer.
     snd_pcm_sw_params_t* sw = nullptr;
     snd_pcm_sw_params_alloca(&sw);
     snd_pcm_sw_params_current(handle, sw);
-    const snd_pcm_uframes_t startThreshold = isCapture
-        ? settings.periodFrames
-        : settings.bufferFrames;
-    snd_pcm_sw_params_set_start_threshold(handle, sw, startThreshold);
+    snd_pcm_sw_params_set_start_threshold(handle, sw, settings.periodFrames);
     snd_pcm_sw_params_set_avail_min(handle, sw, settings.periodFrames);
     if (snd_pcm_sw_params(handle, sw) < 0) {
         std::fprintf(stderr, "Warning: sw_params failed for %s\n", device.c_str());
+    }
+
+    // All steady-state I/O is driven by bounded snd_pcm_wait() calls. ALSA's
+    // read/write functions themselves must never be able to block forever.
+    if (snd_pcm_nonblock(handle, 1) < 0) {
+        errorMsg_ = std::string("Could not enable nonblocking ALSA I/O for '")
+                  + device + "'";
+        snd_pcm_close(handle);
+        handle = nullptr;
+        return false;
     }
 
     return true;
@@ -323,14 +343,17 @@ void AlsaAudioEngine::run()
         return;
     }
 
+    // Mark the loop stoppable before priming: nonblocking priming may wait for
+    // playback readiness, and stop() must be able to interrupt that wait.
+    running_.store(true, std::memory_order_release);
+
     // Prime the playback buffer to prevent underrun before the first read
     if (!primePlayback()) {
+        running_.store(false, std::memory_order_release);
         errorMsg_ = std::string("Playback priming failed: ")
                   + snd_strerror(lastAlsaError_);
         return;
     }
-
-    running_.store(true, std::memory_order_release);
 
     const int frames = static_cast<int>(actualFrames_);
 
@@ -404,9 +427,10 @@ void AlsaAudioEngine::run()
 void AlsaAudioEngine::stop()
 {
     running_.store(false, std::memory_order_release);
-    // Abort any in-progress snd_pcm_readi so the audio loop unblocks
-    // immediately rather than waiting for the next period to arrive.
+    // Interrupt either side of the loop. The thread may be waiting for capture
+    // or playback, especially when independent device clocks have drifted.
     if (captureHandle_) snd_pcm_drop(captureHandle_);
+    if (playbackHandle_) snd_pcm_drop(playbackHandle_);
 }
 
 void AlsaAudioEngine::close()
@@ -433,6 +457,7 @@ void AlsaAudioEngine::close()
 
 bool AlsaAudioEngine::recoverBoth()
 {
+    liveRecoveryAttempts_.fetch_add(1, std::memory_order_relaxed);
     if (config_.enableRealtimeMetrics)
         ++metrics_.recoveryAttempts;
 
@@ -446,6 +471,7 @@ bool AlsaAudioEngine::recoverBoth()
     if (err < 0) {
         lastAlsaError_ = err;
         lastErrorWasCapture_ = true;
+        liveRecoveryFailures_.fetch_add(1, std::memory_order_relaxed);
         if (config_.enableRealtimeMetrics)
             ++metrics_.recoveryFailures;
         return false;
@@ -455,12 +481,14 @@ bool AlsaAudioEngine::recoverBoth()
     if (err < 0) {
         lastAlsaError_ = err;
         lastErrorWasCapture_ = false;
+        liveRecoveryFailures_.fetch_add(1, std::memory_order_relaxed);
         if (config_.enableRealtimeMetrics)
             ++metrics_.recoveryFailures;
         return false;
     }
 
     if (!primePlayback()) {
+        liveRecoveryFailures_.fetch_add(1, std::memory_order_relaxed);
         if (config_.enableRealtimeMetrics)
             ++metrics_.recoveryFailures;
         return false;
@@ -485,6 +513,7 @@ bool AlsaAudioEngine::readCaptureBlock(int frames)
 {
     const int bytesPerFrame = captureChannels_ * bytesPerSample(captureFmt_);
     int offset = 0;
+    int waitAttempts = 0;
     while (offset < frames) {
         const int remaining = frames - offset;
         auto* destination = captureRaw_.data()
@@ -495,12 +524,20 @@ bool AlsaAudioEngine::readCaptureBlock(int frames)
             if (result != remaining && config_.enableRealtimeMetrics)
                 ++metrics_.shortReads;
             offset += static_cast<int>(result);
+            waitAttempts = 0;
             continue;
         }
 
-        // A blocking ALSA handle should not return zero frames. Treat it as a
-        // recoverable I/O failure rather than spinning in the realtime loop.
-        recordIoError(true, result < 0 ? static_cast<int>(result) : -EIO);
+        if (result == -EAGAIN) {
+            if (!waitForIo(captureHandle_, true, waitAttempts))
+                return false;
+            continue;
+        }
+
+        // Zero frames is not useful progress. Treat it as a recoverable I/O
+        // failure rather than spinning in the realtime loop.
+        if (running_.load(std::memory_order_acquire))
+            recordIoError(true, result < 0 ? static_cast<int>(result) : -EIO);
         return false;
     }
     return true;
@@ -510,6 +547,7 @@ bool AlsaAudioEngine::writePlaybackBlock(const void* data, int frames)
 {
     const int bytesPerFrame = playbackChannels_ * bytesPerSample(playbackFmt_);
     int offset = 0;
+    int waitAttempts = 0;
     while (offset < frames) {
         const int remaining = frames - offset;
         const auto* source = static_cast<const uint8_t*>(data)
@@ -520,21 +558,52 @@ bool AlsaAudioEngine::writePlaybackBlock(const void* data, int frames)
             if (result != remaining && config_.enableRealtimeMetrics)
                 ++metrics_.shortWrites;
             offset += static_cast<int>(result);
+            waitAttempts = 0;
             continue;
         }
 
-        // A blocking ALSA handle should not return zero frames. Treat it as a
-        // recoverable I/O failure rather than spinning in the realtime loop.
-        recordIoError(false, result < 0 ? static_cast<int>(result) : -EIO);
+        if (result == -EAGAIN) {
+            if (!waitForIo(playbackHandle_, false, waitAttempts))
+                return false;
+            continue;
+        }
+
+        // Zero frames is not useful progress. Treat it as a recoverable I/O
+        // failure rather than spinning in the realtime loop.
+        if (running_.load(std::memory_order_acquire))
+            recordIoError(false, result < 0 ? static_cast<int>(result) : -EIO);
         return false;
     }
     return true;
+}
+
+bool AlsaAudioEngine::waitForIo(snd_pcm_t* handle, bool capture, int& waitAttempts)
+{
+    // A readiness wakeup can race with device state changes. Permit a small,
+    // fixed number of retries, each with a finite timeout, then recover both
+    // streams instead of allowing the realtime thread to hang indefinitely.
+    constexpr int kMaxWaitAttempts = 4;
+    if (++waitAttempts > kMaxWaitAttempts) {
+        recordIoError(capture, -ETIMEDOUT);
+        return false;
+    }
+
+    const int result = snd_pcm_wait(handle, ioWaitTimeoutMs_);
+    if (result > 0)
+        return running_.load(std::memory_order_acquire);
+
+    if (running_.load(std::memory_order_acquire))
+        recordIoError(capture, result < 0 ? result : -ETIMEDOUT);
+    return false;
 }
 
 void AlsaAudioEngine::recordIoError(bool capture, int errorCode)
 {
     lastAlsaError_ = errorCode;
     lastErrorWasCapture_ = capture;
+    liveLastErrorCode_.store(errorCode, std::memory_order_relaxed);
+    liveLastWasCapture_.store(capture, std::memory_order_relaxed);
+    ioErrorCount_.fetch_add(1, std::memory_order_release);
     if (!config_.enableRealtimeMetrics)
         return;
 
@@ -613,6 +682,17 @@ AudioEngine::RealtimeMetrics AlsaAudioEngine::realtimeMetrics() const
     result.shortWrites = metrics_.shortWrites;
     result.recoveryAttempts = metrics_.recoveryAttempts;
     result.recoveryFailures = metrics_.recoveryFailures;
+    return result;
+}
+
+AlsaAudioEngine::IoStatus AlsaAudioEngine::ioStatus() const noexcept
+{
+    IoStatus result;
+    result.errors = ioErrorCount_.load(std::memory_order_acquire);
+    result.recoveryAttempts = liveRecoveryAttempts_.load(std::memory_order_relaxed);
+    result.recoveryFailures = liveRecoveryFailures_.load(std::memory_order_relaxed);
+    result.lastErrorCode = liveLastErrorCode_.load(std::memory_order_relaxed);
+    result.lastWasCapture = liveLastWasCapture_.load(std::memory_order_relaxed);
     return result;
 }
 

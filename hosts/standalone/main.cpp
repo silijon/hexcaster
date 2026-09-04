@@ -709,8 +709,26 @@ int main(int argc, char** argv)
             midiInput.isOpen() ? "  |  MIDI active" : "");
 
         std::thread watcher([&]() {
-            while (!gQuit.load(std::memory_order_relaxed))
+            uint64_t reportedIoErrors = 0;
+            int statusPolls = 0;
+            while (!gQuit.load(std::memory_order_relaxed)) {
                 usleep(50000);
+                if (++statusPolls < 10)
+                    continue;
+                statusPolls = 0;
+                const auto io = engine.ioStatus();
+                if (io.errors != reportedIoErrors) {
+                    reportedIoErrors = io.errors;
+                    std::fprintf(stderr,
+                        "ALSA runtime I/O error: side=%s error=%s total=%llu "
+                        "recoveries=%llu failures=%llu\n",
+                        io.lastWasCapture ? "capture" : "playback",
+                        snd_strerror(io.lastErrorCode),
+                        static_cast<unsigned long long>(io.errors),
+                        static_cast<unsigned long long>(io.recoveryAttempts),
+                        static_cast<unsigned long long>(io.recoveryFailures));
+                }
+            }
             engine.stop();
         });
 

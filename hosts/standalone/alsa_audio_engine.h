@@ -20,8 +20,9 @@ namespace hexcaster {
  * Opens separate capture and playback handles on independent devices.
  * HexCaster always uses separate ADC (USB input) and DAC (amp board output)
  * devices, so snd_pcm_link() is not used.
- * Runs a blocking read/write loop on the calling thread with optional
- * SCHED_FIFO real-time priority.
+ * run() occupies the calling thread, but PCM reads and writes are nonblocking
+ * and coordinated with bounded snd_pcm_wait() calls so shutdown cannot hang
+ * behind a stalled device. The thread requests SCHED_FIFO priority.
  *
  * Channel handling:
  *   - Capture: reads N-channel interleaved audio, extracts config.inputChannel
@@ -40,6 +41,14 @@ namespace hexcaster {
  */
 class AlsaAudioEngine : public AudioEngine {
 public:
+    struct IoStatus {
+        uint64_t errors           = 0;
+        uint64_t recoveryAttempts = 0;
+        uint64_t recoveryFailures = 0;
+        int      lastErrorCode    = 0;
+        bool     lastWasCapture   = false;
+    };
+
     AlsaAudioEngine() = default;
     ~AlsaAudioEngine() override;
 
@@ -56,6 +65,7 @@ public:
     unsigned int actualSampleRate()   const override { return actualRate_; }
     unsigned int actualBufferFrames() const override { return actualFrames_; }
     RealtimeMetrics realtimeMetrics() const override;
+    IoStatus ioStatus() const noexcept;
 
 private:
     enum class SampleFormat { 
@@ -101,6 +111,7 @@ private:
     bool recoverBoth();
     bool readCaptureBlock(int frames);
     bool writePlaybackBlock(const void* data, int frames);
+    bool waitForIo(snd_pcm_t* handle, bool capture, int& waitAttempts);
 
     bool primePlayback();
     void recordDuration(std::array<uint32_t, kMetricBins>& histogram,
@@ -147,6 +158,12 @@ private:
     std::string       errorMsg_;
     int               lastAlsaError_ = 0;
     bool              lastErrorWasCapture_ = false;
+    int               ioWaitTimeoutMs_ = 20;
+    std::atomic<uint64_t> ioErrorCount_{ 0 };
+    std::atomic<uint64_t> liveRecoveryAttempts_{ 0 };
+    std::atomic<uint64_t> liveRecoveryFailures_{ 0 };
+    std::atomic<int>      liveLastErrorCode_{ 0 };
+    std::atomic<bool>     liveLastWasCapture_{ false };
     MetricAccumulator metrics_;
 };
 
