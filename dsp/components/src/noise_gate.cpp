@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace hexcaster {
 
@@ -33,6 +34,10 @@ void NoiseGate::prepare(float sampleRate, int /*maxBlockSize*/)
 {
     sampleRate_ = sampleRate;
     reset();
+    cachedThresholdDb_ = std::numeric_limits<float>::quiet_NaN();
+    cachedAttackMs_ = std::numeric_limits<float>::quiet_NaN();
+    cachedReleaseMs_ = std::numeric_limits<float>::quiet_NaN();
+    cachedHoldMs_ = std::numeric_limits<float>::quiet_NaN();
     updateCoefficients();
 }
 
@@ -46,7 +51,8 @@ void NoiseGate::reset()
 
 void NoiseGate::process(float* buffer, int numSamples)
 {
-    // Refresh coefficients once per block from the atomics.
+    // Atomics are read once per block; transcendentals run only on control
+    // changes.
     updateCoefficients();
 
     for (int i = 0; i < numSamples; ++i) {
@@ -115,9 +121,10 @@ void NoiseGate::process(float* buffer, int numSamples)
         buffer[i] = input * gateGain_;
     }
 
-    // Publish observation values for TUI polling (relaxed -- just visibility).
-    observedGateGain_.store(gateGain_, std::memory_order_relaxed);
-    observedState_.store(static_cast<uint8_t>(state_), std::memory_order_relaxed);
+    if (observationEnabled_.load(std::memory_order_relaxed)) {
+        observedGateGain_.store(gateGain_, std::memory_order_relaxed);
+        observedState_.store(static_cast<uint8_t>(state_), std::memory_order_relaxed);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -144,6 +151,11 @@ void NoiseGate::setHoldMs(float ms)
     holdMs_.store(std::clamp(ms, 0.f, 500.f), std::memory_order_relaxed);
 }
 
+void NoiseGate::setObservationEnabled(bool enabled)
+{
+    observationEnabled_.store(enabled, std::memory_order_relaxed);
+}
+
 float NoiseGate::getThresholdDb()  const { return thresholdDb_.load(std::memory_order_relaxed); }
 float NoiseGate::getAttackMs()     const { return attackMs_.load(std::memory_order_relaxed); }
 float NoiseGate::getReleaseMs()    const { return releaseMs_.load(std::memory_order_relaxed); }
@@ -165,13 +177,24 @@ NoiseGate::State NoiseGate::getState() const
 
 void NoiseGate::updateCoefficients()
 {
-    thresholdLin_    = dbToLinear(thresholdDb_.load(std::memory_order_relaxed));
-    attackCoeff_     = msToCoeff(attackMs_.load(std::memory_order_relaxed),   sampleRate_);
-    releaseCoeff_    = msToCoeff(releaseMs_.load(std::memory_order_relaxed),  sampleRate_);
+    const float thresholdDb = thresholdDb_.load(std::memory_order_relaxed);
+    const float attackMs = attackMs_.load(std::memory_order_relaxed);
+    const float releaseMs = releaseMs_.load(std::memory_order_relaxed);
+    const float holdMs = holdMs_.load(std::memory_order_relaxed);
+    if (thresholdDb == cachedThresholdDb_ && attackMs == cachedAttackMs_
+        && releaseMs == cachedReleaseMs_ && holdMs == cachedHoldMs_)
+        return;
+
+    cachedThresholdDb_ = thresholdDb;
+    cachedAttackMs_ = attackMs;
+    cachedReleaseMs_ = releaseMs;
+    cachedHoldMs_ = holdMs;
+    thresholdLin_    = dbToLinear(thresholdDb);
+    attackCoeff_     = msToCoeff(attackMs, sampleRate_);
+    releaseCoeff_    = msToCoeff(releaseMs, sampleRate_);
     // Envelope follower release: ~3x faster than gate release for responsiveness
-    envReleaseCoeff_ = msToCoeff(releaseMs_.load(std::memory_order_relaxed) / 3.f, sampleRate_);
-    holdSamples_     = static_cast<int>(holdMs_.load(std::memory_order_relaxed)
-                                        * 0.001f * sampleRate_);
+    envReleaseCoeff_ = msToCoeff(releaseMs / 3.f, sampleRate_);
+    holdSamples_     = static_cast<int>(holdMs * 0.001f * sampleRate_);
 }
 
 } // namespace hexcaster

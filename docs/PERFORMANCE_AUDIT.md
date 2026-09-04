@@ -2,8 +2,21 @@
 
 Date: 2026-09-03
 
-Status: Research and implementation recommendations only. This audit did not
-change runtime behavior.
+Status: Initial reliability/performance batch implemented on 2026-09-04.
+
+Completed from the prioritized plan:
+
+1. Opt-in fixed-storage realtime timing and xrun instrumentation (`--rt-metrics`)
+2. Independent capture/playback ALSA negotiation and mismatch validation
+3. Bounded handling for short ALSA reads and writes
+4. Best-effort memory locking, stack prefaulting, and flush-to-zero setup
+5. DSP/NAM preparation and prewarming after ALSA negotiation
+8. Caching of unchanged parameter application and noise-gate/Bloom derived values
+9. TUI-only level metering and default-Bloom chord-score tracking
+
+The remaining significant reliability risk is independent input/output clock
+drift. It requires measured validation and, if necessary, a later asynchronous
+capture/playback design; it is intentionally not hidden by this initial batch.
 
 ## Objective
 
@@ -502,4 +515,3 @@ than copied from generic tuning guidance.
 The recommended first implementation batch is items 1-5. They improve realtime
 reliability and make every later optimization measurable while preserving the
 existing DSP sound and signal ordering.
-

@@ -3,6 +3,8 @@
 #include "audio_engine.h"
 
 #include <atomic>
+#include <array>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -53,6 +55,7 @@ public:
     const std::string& errorMessage() const override { return errorMsg_; }
     unsigned int actualSampleRate()   const override { return actualRate_; }
     unsigned int actualBufferFrames() const override { return actualFrames_; }
+    RealtimeMetrics realtimeMetrics() const override;
 
 private:
     enum class SampleFormat { 
@@ -64,13 +67,49 @@ private:
 
     static int bytesPerSample(SampleFormat fmt);
 
+    struct DeviceSettings {
+        unsigned int sampleRate   = 0;
+        unsigned int periodFrames = 0;
+        unsigned int bufferFrames = 0;
+        unsigned int periods      = 0;
+    };
+
+    static constexpr uint64_t kMetricBinNs = 1000;   // 1 us bins
+    static constexpr std::size_t kMetricBins = 10001; // covers 0-10 ms
+
+    struct MetricAccumulator {
+        uint64_t blockCount       = 0;
+        uint64_t processingTotalNs = 0;
+        uint64_t processingMaxNs   = 0;
+        uint64_t callbackTotalNs   = 0;
+        uint64_t callbackMaxNs     = 0;
+        uint64_t deadlineMisses    = 0;
+        uint64_t captureOverruns   = 0;
+        uint64_t playbackUnderruns = 0;
+        uint64_t shortReads        = 0;
+        uint64_t shortWrites       = 0;
+        uint64_t recoveryAttempts  = 0;
+        uint64_t recoveryFailures  = 0;
+        std::array<uint32_t, kMetricBins> processingHistogram{};
+        std::array<uint32_t, kMetricBins> callbackHistogram{};
+    };
+
     bool openHandle(const std::string& device, bool isCapture,
                     snd_pcm_t*& handle, unsigned int& channels,
-                    SampleFormat& fmt);
+                    SampleFormat& fmt, DeviceSettings& settings);
 
     bool recoverBoth();
+    bool readCaptureBlock(int frames);
+    bool writePlaybackBlock(const void* data, int frames);
 
-    void primePlayback();
+    bool primePlayback();
+    void recordDuration(std::array<uint32_t, kMetricBins>& histogram,
+                        uint64_t durationNs, uint64_t& totalNs,
+                        uint64_t& maxNs);
+    void recordIoError(bool capture, int errorCode);
+    static uint64_t monotonicRawNs() noexcept;
+    static uint64_t percentileNs(const std::array<uint32_t, kMetricBins>& histogram,
+                                 uint64_t count, unsigned int perThousand) noexcept;
 
     // Interleaved raw buffer -> mono float (extract one channel)
     void deinterleaveCapture(const void* raw, float* mono,
@@ -90,6 +129,8 @@ private:
     unsigned int  playbackChannels_ = 2;
     unsigned int  actualRate_       = 0;
     unsigned int  actualFrames_     = 0;
+    DeviceSettings captureSettings_;
+    DeviceSettings playbackSettings_;
 
     // Raw interleaved capture/playback buffers (allocated at open time)
     std::vector<uint8_t> captureRaw_;
@@ -104,6 +145,9 @@ private:
     ProcessCallback   callback_;
     std::atomic<bool> running_{ false };
     std::string       errorMsg_;
+    int               lastAlsaError_ = 0;
+    bool              lastErrorWasCapture_ = false;
+    MetricAccumulator metrics_;
 };
 
 } // namespace hexcaster

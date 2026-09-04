@@ -34,6 +34,7 @@ void BloomController::prepare(float sampleRate, int /*maxBlockSize*/)
 
     cachedAttackMs_        = -1.f;  // force gain envelope coefficient recompute on first block
     cachedReleaseMs_       = -1.f;
+    cachedSensitivityDb_   = -1.f;
 
     reset();
 }
@@ -67,9 +68,23 @@ void BloomController::preProcess(const float* buffer, int numSamples)
     const float basePostDb   = basePostDb_.load(std::memory_order_relaxed);
     const float depth        = depth_.load(std::memory_order_relaxed);
     const float compensation = compensation_.load(std::memory_order_relaxed);
-    const float attackMs          = attackMs_.load(std::memory_order_relaxed);
-    const float releaseMs         = releaseMs_.load(std::memory_order_relaxed);
-    const float sensitivityLin    = std::pow(10.f, sensitivity_.load(std::memory_order_relaxed) / 20.f);
+    const float attackMs = attackMs_.load(std::memory_order_relaxed);
+    const float releaseMs = releaseMs_.load(std::memory_order_relaxed);
+    const float sensitivityDb = sensitivity_.load(std::memory_order_relaxed);
+    if (sensitivityDb != cachedSensitivityDb_) {
+        cachedSensitivityDb_ = sensitivityDb;
+        sensitivityLin_ = std::pow(10.f, sensitivityDb / 20.f);
+    }
+    const float sensitivityLin = sensitivityLin_;
+    const bool publishObservations = observationEnabled_.load(std::memory_order_relaxed);
+    // Chord score is audio-relevant in experimental builds and diagnostic-only
+    // in the default build. Avoid its per-sample work for headless default DSP.
+#if HEXCASTER_EXPERIMENTAL_BLOOM
+    constexpr bool kExperimentalBloom = true;
+#else
+    constexpr bool kExperimentalBloom = false;
+#endif
+    const bool trackChordScore = publishObservations || kExperimentalBloom;
 
     // Recompute EMA coefficients if attack/release changed
     if (attackMs != cachedAttackMs_ || releaseMs != cachedReleaseMs_) {
@@ -121,84 +136,64 @@ void BloomController::preProcess(const float* buffer, int numSamples)
         const float prevSD = detSmoothEnv;
         detSmoothEnv = detectorSmoothCoeff_ * detSmoothEnv + (1.f - detectorSmoothCoeff_) * detRawEnv;
 
-        // ---------------------------------------------------------------
-        // Stage 1d: detector slope
-        // ---------------------------------------------------------------
-        // delta is the per-sample rate of change of the smoothed detector.
-        // ---------------------------------------------------------------
-        const float delta    = detSmoothEnv - prevSD;
+        if (trackChordScore) {
+            // Detector slope, peak, and chord-score tracking are required for
+            // the Bloom TUI and for the experimental Bloom envelope, but are
+            // otherwise outside the default audio-control path.
+            const float delta = detSmoothEnv - prevSD;
+            constexpr float alpha = 0.005f;
+            constexpr float epsilon = 0.00005f;
+            detSlope += alpha * (delta - detSlope);
 
-        // ---------------------------------------------------------------
-        // Stage 1e: peak and slope detection 
-        // ---------------------------------------------------------------
-        // find a new peak
-        const float alpha = 0.005f; // how much we are considering the delta component in slope derivation 
-        const float epsilon = 0.00005f; // min slope difference to discover new peak 
-        detSlope += alpha * (delta - detSlope);  // calculate a smoothed slope from the raw delta
-        
-        // calculate the peak and the max slope for the current transient
-        if (detSlope > epsilon) { // new peak
-            detHoldoffCounter = kDetectorHoldoffSamples;
-            if (!detUnderAttack) {
-                // this is the start of a new transient
-                detUnderAttack = true;
-                detMaxSlope = detSlope;  // reset
-                detPeak = detSmoothEnv;  // reset
-                // capture the gap before this onset for dynamic weighting
-                lastTransInterval = samplesSinceLastTrans;
-                samplesSinceLastTrans = 0;
-            }
-            if (detSmoothEnv > detPeak) { // peak is rising
-                detPeak = detSmoothEnv;
-                detMaxSlope = std::max(detSlope, detMaxSlope);
-            }
-        } else {
-            if (detUnderAttack) {
-                // keep tracking peak and slope during holdoff
+            if (detSlope > epsilon) {
+                detHoldoffCounter = kDetectorHoldoffSamples;
+                if (!detUnderAttack) {
+                    detUnderAttack = true;
+                    detMaxSlope = detSlope;
+                    detPeak = detSmoothEnv;
+                    lastTransInterval = samplesSinceLastTrans;
+                    samplesSinceLastTrans = 0;
+                }
+                if (detSmoothEnv > detPeak) {
+                    detPeak = detSmoothEnv;
+                    detMaxSlope = std::max(detSlope, detMaxSlope);
+                }
+            } else if (detUnderAttack) {
                 if (detSmoothEnv > detPeak) {
                     detPeak = detSmoothEnv;
                     detMaxSlope = std::max(detSlope, detMaxSlope);
                 }
                 if (--detHoldoffCounter <= 0) {
-                    // attack phase ended
-                    // detPeak and detMaxSlope are finalized for this transient
-                    // hold them until the next transient
                     detUnderAttack = false;
-                    // Compute chord score target now that peak + maxSlope
-                    // are finalized. Dynamic blend: long interval since
-                    // previous onset → trust slope; short interval → trust
-                    // peak. Trailing * kPeakRef rescales so chord-typical
-                    // values land near the existing 0.5 gain pivot.
                     const float speedFactor = std::min(
                         static_cast<float>(lastTransInterval) / fastNoteSamples, 1.f);
-                    const float slopeWeight = speedFactor;
-                    const float peakWeight  = 1.f - speedFactor;
-                    const float peakNorm    = std::min(detPeak     / kPeakRef,  1.f);
-                    const float slopeNorm   = std::min(detMaxSlope / kSlopeRef, 1.f);
-                    chordScoreTarget = (peakWeight * peakNorm + slopeWeight * slopeNorm) * kPeakRef;
+                    const float peakWeight = 1.f - speedFactor;
+                    const float peakNorm = std::min(detPeak / kPeakRef, 1.f);
+                    const float slopeNorm = std::min(detMaxSlope / kSlopeRef, 1.f);
+                    chordScoreTarget = (peakWeight * peakNorm + speedFactor * slopeNorm)
+                                     * kPeakRef;
                 }
             }
-        }
 
-        // Smooth the held chord score target every sample so step changes
-        // at end-of-attack don't pump the gain envelope audibly.
-        chordScoreSmoothed = chordScoreSmoothCoeff_ * chordScoreSmoothed
-                           + (1.f - chordScoreSmoothCoeff_) * chordScoreTarget;
-        ++samplesSinceLastTrans;
+            chordScoreSmoothed = chordScoreSmoothCoeff_ * chordScoreSmoothed
+                               + (1.f - chordScoreSmoothCoeff_) * chordScoreTarget;
+            ++samplesSinceLastTrans;
+        }
     }
 
     detectorRawEnv_        = detRawEnv;
     detectorSmoothEnv_     = detSmoothEnv;
-    detectorPeak_          = detPeak;
-    detectorSlope_         = detSlope;
-    detectorMaxSlope_      = detMaxSlope;
-    detectorUnderAttack_   = detUnderAttack;
-    detectorHoldoffCounter_ = detHoldoffCounter;
-
-    samplesSinceLastTransient_ = samplesSinceLastTrans;
-    lastTransientInterval_     = lastTransInterval;
-    chordScoreTarget_          = chordScoreTarget;
-    chordScoreSmoothed_        = chordScoreSmoothed;
+    if (trackChordScore) {
+        detectorPeak_ = detPeak;
+        detectorSlope_ = detSlope;
+        detectorMaxSlope_ = detMaxSlope;
+        detectorUnderAttack_ = detUnderAttack;
+        detectorHoldoffCounter_ = detHoldoffCounter;
+        samplesSinceLastTransient_ = samplesSinceLastTrans;
+        lastTransientInterval_ = lastTransInterval;
+        chordScoreTarget_ = chordScoreTarget;
+        chordScoreSmoothed_ = chordScoreSmoothed;
+    }
 
 #if HEXCASTER_EXPERIMENTAL_BLOOM
     // Experimental chord-aware power curve.
@@ -217,27 +212,21 @@ void BloomController::preProcess(const float* buffer, int numSamples)
 #endif
     gainEnv_ = gainEnv;
 
-    // Publish observations for visual output.
-    // Det Env: smooth envelope is the operative detection envelope.
-    // Gain Env: always the gain envelope.
-    const float detRawForViz = std::clamp(detRawEnv, 0.f, 1.f);
-    observedDetectorRawEnvelope_.store(detRawForViz, std::memory_order_relaxed);
-
-    const float detForViz = std::clamp(detSmoothEnv, 0.f, 1.f);
-    observedDetectorEnvelope_.store(detForViz, std::memory_order_relaxed);
-
-    const float peakForViz = std::clamp(detPeak, 0.f, 1.f);
-    observedDetectorPeak_.store(peakForViz, std::memory_order_relaxed);
-
-    const float slopeForViz = std::clamp(detMaxSlope * 1000, -1.f, 1.f);
-    observedDetectorSlope_.store(slopeForViz, std::memory_order_relaxed);
-
     // Clamp for the gain formulas (safety net -- gainEnv should already be [0,1]).
     const float clampedGainEnv = std::clamp(gainEnv, 0.f, 1.f);
-    observedGainEnvelope_.store(clampedGainEnv, std::memory_order_relaxed);
-
-    const float chordScoreForViz = std::clamp(chordScoreSmoothed, 0.f, 1.f);
-    observedChordScore_.store(chordScoreForViz, std::memory_order_relaxed);
+    if (publishObservations) {
+        observedDetectorRawEnvelope_.store(std::clamp(detRawEnv, 0.f, 1.f),
+                                           std::memory_order_relaxed);
+        observedDetectorEnvelope_.store(std::clamp(detSmoothEnv, 0.f, 1.f),
+                                        std::memory_order_relaxed);
+        observedDetectorPeak_.store(std::clamp(detPeak, 0.f, 1.f),
+                                    std::memory_order_relaxed);
+        observedDetectorSlope_.store(std::clamp(detMaxSlope * 1000.f, -1.f, 1.f),
+                                     std::memory_order_relaxed);
+        observedGainEnvelope_.store(clampedGainEnv, std::memory_order_relaxed);
+        observedChordScore_.store(std::clamp(chordScoreSmoothed, 0.f, 1.f),
+                                  std::memory_order_relaxed);
+    }
 
     // Compute gain targets from the envelope
     const float reductionDb = depth * clampedGainEnv;
@@ -322,6 +311,11 @@ void BloomController::setReleaseMs(float ms)
 void BloomController::setSensitivity(float db)
 {
     sensitivity_.store(std::clamp(db, 0.f, 20.f), std::memory_order_relaxed);
+}
+
+void BloomController::setObservationEnabled(bool enabled)
+{
+    observationEnabled_.store(enabled, std::memory_order_relaxed);
 }
 
 // ---------------------------------------------------------------------------

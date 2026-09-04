@@ -90,6 +90,7 @@ public:
     void setAttackMs(float ms);
     void setReleaseMs(float ms);
     void setSensitivity(float db);         // detection signal gain [0, 40] dB
+    void setObservationEnabled(bool enabled);
 
     /**
      * Read the current gain envelope value [0.0, 1.0].
@@ -157,6 +158,7 @@ private:
     std::atomic<float>   attackMs_            { 5.f  };
     std::atomic<float>   releaseMs_           { 5.f  };
     std::atomic<float>   sensitivity_         { 5.f  }; // dB
+    std::atomic<bool>    observationEnabled_  { true };
 
     // --- Observation atomics (written by audio thread, read by TUI thread) ---
     // Updated once per block at the end of preProcess(). Relaxed ordering.
@@ -232,6 +234,8 @@ private:
 
     float cachedAttackMs_    = -1.f;
     float cachedReleaseMs_   = -1.f;
+    float cachedSensitivityDb_ = -1.f;
+    float sensitivityLin_      = 1.f;
 
     void updateCoefficients();
     void computeHpfCoefficients();

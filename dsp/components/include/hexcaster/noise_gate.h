@@ -50,6 +50,7 @@ public:
     void setAttackMs(float ms);
     void setReleaseMs(float ms);
     void setHoldMs(float ms);
+    void setObservationEnabled(bool enabled);
 
     float getThresholdDb()  const;
     float getAttackMs()     const;
@@ -72,8 +73,8 @@ public:
 
 private:
 
-    // Recompute coefficients from current atomic values.
-    // Called at the top of each block -- not RT-unsafe, just a few maths ops.
+    // Refresh coefficients only when a control value changed. Atomics are read
+    // once per block; expensive conversions stay out of steady-state DSP.
     void updateCoefficients();
 
     static float msToCoeff(float ms, float sampleRate);
@@ -89,6 +90,7 @@ private:
     std::atomic<float> attackMs_{    0.5f  };
     std::atomic<float> releaseMs_{  50.f   };
     std::atomic<float> holdMs_{     50.f   };
+    std::atomic<bool>  observationEnabled_{ true };
 
     // --- Audio thread state (only touched in process()) ---
     float sampleRate_     = 48000.f;
@@ -103,6 +105,12 @@ private:
     float releaseCoeff_   = 0.f;   // EMA coeff for closing
     float envReleaseCoeff_= 0.f;   // EMA coeff for envelope follower decay
     int   holdSamples_    = 0;
+
+    // NaN sentinels force coefficient generation after prepare().
+    float cachedThresholdDb_ = 0.f;
+    float cachedAttackMs_    = 0.f;
+    float cachedReleaseMs_   = 0.f;
+    float cachedHoldMs_      = 0.f;
 };
 
 } // namespace hexcaster

@@ -22,6 +22,7 @@
 #include "level_meter.h"
 
 #include <atomic>
+#include <array>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -74,6 +75,7 @@ struct Args {
     bool         listMidi       = false;
     bool         help           = false;
     bool         tui            = false;
+    bool         realtimeMetrics = false;
     std::vector<MidiCcMapping> midiMappings;
 };
 
@@ -104,6 +106,7 @@ static void printUsage(const char* prog)
         "  --list-devices              Print ALSA PCM devices and exit\n"
         "  --list-midi                 Print ALSA raw MIDI devices and exit\n"
         "  --tui                       Start in terminal UI mode\n"
+        "  --rt-metrics                Collect per-block timing/xrun metrics (benchmarking)\n"
         "  --help                      Show this help and exit\n"
         "\n"
         "Parameter names for --midi-cc:\n"
@@ -174,6 +177,10 @@ static bool parseArgs(int argc, char** argv, Args& args)
         }
         if (std::strcmp(key, "--tui") == 0) {
             args.tui = true;
+            continue;
+        }
+        if (std::strcmp(key, "--rt-metrics") == 0) {
+            args.realtimeMetrics = true;
             continue;
         }
 
@@ -293,6 +300,39 @@ static void listMidiDevices()
     snd_device_name_free_hint(hints);
 }
 
+static void printRealtimeMetrics(const hexcaster::AudioEngine::RealtimeMetrics& metrics,
+                                 unsigned int sampleRate, unsigned int frames)
+{
+    if (!metrics.enabled)
+        return;
+
+    const double deadlineUs = 1000000.0 * static_cast<double>(frames)
+                           / static_cast<double>(sampleRate);
+    const auto toUs = [](uint64_t ns) { return static_cast<double>(ns) / 1000.0; };
+    std::fprintf(stdout,
+        "Realtime metrics (%llu blocks, deadline %.1f us):\n"
+        "  DSP + conversion: mean %.1f us  p95 %.1f us  p99 %.1f us  p99.9 %.1f us  max %.1f us\n"
+        "  DSP callback:     mean %.1f us  p95 %.1f us  p99 %.1f us  p99.9 %.1f us  max %.1f us\n"
+        "  deadline misses:  %llu\n"
+        "  capture overruns: %llu  playback underruns: %llu\n"
+        "  short I/O:        reads=%llu writes=%llu\n"
+        "  recoveries:       attempts=%llu failures=%llu\n",
+        static_cast<unsigned long long>(metrics.processedBlocks), deadlineUs,
+        toUs(metrics.processingMeanNs), toUs(metrics.processingP95Ns),
+        toUs(metrics.processingP99Ns), toUs(metrics.processingP999Ns),
+        toUs(metrics.processingMaxNs),
+        toUs(metrics.callbackMeanNs), toUs(metrics.callbackP95Ns),
+        toUs(metrics.callbackP99Ns), toUs(metrics.callbackP999Ns),
+        toUs(metrics.callbackMaxNs),
+        static_cast<unsigned long long>(metrics.deadlineMisses),
+        static_cast<unsigned long long>(metrics.captureOverruns),
+        static_cast<unsigned long long>(metrics.playbackUnderruns),
+        static_cast<unsigned long long>(metrics.shortReads),
+        static_cast<unsigned long long>(metrics.shortWrites),
+        static_cast<unsigned long long>(metrics.recoveryAttempts),
+        static_cast<unsigned long long>(metrics.recoveryFailures));
+}
+
 // ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
@@ -401,17 +441,58 @@ int main(int argc, char** argv)
     pipeline.addStage(&eq);             // stage 5: post-NAM EQ
     pipeline.addStage(&masterVolume);   // stage 6: master volume (user)
     pipeline.addController(&bloom);
-    pipeline.prepare(static_cast<float>(args.sampleRate),
-                     static_cast<int>(args.bufferFrames));
-    bloom.prepare(static_cast<float>(args.sampleRate),
-                  static_cast<int>(args.bufferFrames));
 
     std::fprintf(stdout, "Pipeline: %d stage(s), %d controller(s)\n",
                  pipeline.numStages(), pipeline.numControllers());
 
     // -------------------------------------------------------------------------
-    // Load NAM model
+    // Audio engine
     // -------------------------------------------------------------------------
+
+    hexcaster::AudioEngine::Config audioConfig;
+    audioConfig.inputDevice    = args.inputDevice;
+    audioConfig.outputDevice   = args.outputDevice;
+    audioConfig.sampleRate     = args.sampleRate;
+    audioConfig.bufferFrames   = args.bufferFrames;
+    audioConfig.periods        = 2;
+    audioConfig.enableRealtimeMetrics = args.realtimeMetrics;
+    audioConfig.inputChannel   = args.inputChannel;
+    audioConfig.outputChannels = 0x3;
+
+    hexcaster::AlsaAudioEngine engine;
+    if (!engine.open(audioConfig)) {
+        std::fprintf(stderr, "Error: %s\n", engine.errorMessage().c_str());
+        return 1;
+    }
+
+    std::fprintf(stdout, "Audio: in=%s out=%s rate=%u frames=%u\n",
+        audioConfig.inputDevice.c_str(),
+        audioConfig.outputDevice.c_str(),
+        engine.actualSampleRate(),
+        engine.actualBufferFrames());
+
+    if (engine.actualSampleRate() != args.sampleRate ||
+        engine.actualBufferFrames() != args.bufferFrames) {
+        std::fprintf(stdout,
+            "Note: requested %u Hz / %u frames; ALSA negotiated %u Hz / %u frames\n",
+            args.sampleRate, args.bufferFrames, engine.actualSampleRate(),
+            engine.actualBufferFrames());
+    }
+
+    bool enableTuiObservations = false;
+#ifdef HEXCASTER_TUI_ENABLED
+    enableTuiObservations = args.tui;
+#endif
+    noiseGate.setObservationEnabled(enableTuiObservations);
+    bloom.setObservationEnabled(enableTuiObservations);
+
+    // ALSA negotiation is complete before the DSP graph and NAM loader are
+    // prepared. This ensures every model sees the actual host rate and maximum
+    // block size, never merely the requested values.
+    pipeline.prepare(static_cast<float>(engine.actualSampleRate()),
+                     static_cast<int>(engine.actualBufferFrames()));
+    bloom.prepare(static_cast<float>(engine.actualSampleRate()),
+                  static_cast<int>(engine.actualBufferFrames()));
 
     std::fprintf(stdout, "Loading model: %s\n", args.modelPath.c_str());
     if (!nam.loadModel(args.modelPath, args.namQuality)) {
@@ -419,10 +500,11 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    // Warm-up block: triggers the pending model swap before the audio thread starts
+    // Trigger the pending model swap and touch model working state before the
+    // audio thread is locked and promoted to realtime priority.
     {
-        std::vector<float> warmup(args.bufferFrames, 0.f);
-        pipeline.process(warmup.data(), static_cast<int>(args.bufferFrames));
+        std::vector<float> warmup(engine.actualBufferFrames(), 0.f);
+        pipeline.process(warmup.data(), static_cast<int>(warmup.size()));
     }
 
     const auto modelInfo = nam.modelInfo();
@@ -453,70 +535,71 @@ int main(int argc, char** argv)
         hexcaster::effectivePreNamGainDb(modelInfo.inputCalibrationDb,
                                         userInputTrimDb));
 
-    // -------------------------------------------------------------------------
-    // Audio engine
-    // -------------------------------------------------------------------------
-
-    hexcaster::AudioEngine::Config audioConfig;
-    audioConfig.inputDevice    = args.inputDevice;
-    audioConfig.outputDevice   = args.outputDevice;
-    audioConfig.sampleRate     = args.sampleRate;
-    audioConfig.bufferFrames   = args.bufferFrames;
-    audioConfig.periods        = 2;
-    audioConfig.inputChannel   = args.inputChannel;
-    audioConfig.outputChannels = 0x3;
-
-    hexcaster::AlsaAudioEngine engine;
-    if (!engine.open(audioConfig)) {
-        std::fprintf(stderr, "Error: %s\n", engine.errorMessage().c_str());
-        return 1;
-    }
-
-    std::fprintf(stdout, "Audio: in=%s out=%s rate=%u frames=%u\n",
-        audioConfig.inputDevice.c_str(),
-        audioConfig.outputDevice.c_str(),
-        engine.actualSampleRate(),
-        engine.actualBufferFrames());
-
-    if (engine.actualBufferFrames() != args.bufferFrames) {
-        std::fprintf(stdout, "Note: requested %u frames, device gave %u\n",
-            args.bufferFrames, engine.actualBufferFrames());
-        pipeline.prepare(static_cast<float>(engine.actualSampleRate()),
-                         static_cast<int>(engine.actualBufferFrames()));
-        bloom.prepare(static_cast<float>(engine.actualSampleRate()),
-                      static_cast<int>(engine.actualBufferFrames()));
-    }
-
-    // Signal level meters -- measured in the audio callback, read by TUI.
+    // Signal level meters are needed by the TUI only. Headless production
+    // avoids their full-buffer scans and logarithms.
     hexcaster::LevelMeter inputMeter;
     hexcaster::LevelMeter outputMeter;
 
-    // Audio callback: sync params -> stages each block, then process.
-    // Param reads are atomic; no locks in this path.
+    constexpr std::size_t kParamSlots = static_cast<std::size_t>(hexcaster::ParamId::kCount);
+    std::array<float, kParamSlots> appliedParamValues{};
+    std::array<bool, kParamSlots> hasAppliedParamValue{};
+    auto applyParameterIfChanged = [&](hexcaster::ParamId id, auto&& apply) {
+        const auto index = static_cast<std::size_t>(id);
+        const float value = params.get(id);
+        if (!hasAppliedParamValue[index] || value != appliedParamValues[index]) {
+            appliedParamValues[index] = value;
+            hasAppliedParamValue[index] = true;
+            apply(value);
+        }
+    };
+
+    // Audio callback: atomic parameters are sampled once per block. Stage
+    // setters run only after a parameter change, avoiding steady-state dB and
+    // coefficient conversions while preserving the existing smoothing.
     engine.setCallback([&](float* buf, int n) {
-        // Sync params -> stages each block. Reads are atomic; no locks.
-        noiseGate.setThresholdDb(params.get(hexcaster::ParamId::NoiseGateThreshold_dB));
-        noiseGate.setAttackMs   (params.get(hexcaster::ParamId::NoiseGateAttackMs));
-        noiseGate.setReleaseMs  (params.get(hexcaster::ParamId::NoiseGateReleaseMs));
-        noiseGate.setHoldMs     (params.get(hexcaster::ParamId::NoiseGateHoldMs));
-        inputGain.setGainDb     (params.get(hexcaster::ParamId::InputGain_dB));
-        bloom.setBasePreDb      (params.get(hexcaster::ParamId::BloomBasePre_dB));
-        bloom.setBasePostDb     (params.get(hexcaster::ParamId::BloomBasePost_dB));
-        bloom.setDepth          (params.get(hexcaster::ParamId::BloomDepth_dB));
-        bloom.setCompensation   (params.get(hexcaster::ParamId::BloomCompensation));
-        bloom.setAttackMs          (params.get(hexcaster::ParamId::BloomAttackMs));
-        bloom.setReleaseMs         (params.get(hexcaster::ParamId::BloomReleaseMs));
-        bloom.setSensitivity       (params.get(hexcaster::ParamId::BloomSensitivity_dB));
-        eq.setHighShelfGainDb   (params.get(hexcaster::ParamId::HighShelfGain_dB));
-        eq.setHighShelfHz       (params.get(hexcaster::ParamId::HighShelfHz));
-        eq.setHighShelfBw       (params.get(hexcaster::ParamId::HighShelfBw));
-        eq.setLowShelfGainDb    (params.get(hexcaster::ParamId::LowShelfGain_dB));
-        eq.setLowShelfHz        (params.get(hexcaster::ParamId::LowShelfHz));
-        eq.setLowShelfBw        (params.get(hexcaster::ParamId::LowShelfBw));
-        masterVolume.setGainDb  (params.get(hexcaster::ParamId::MasterVolume_dB));
-        inputMeter.measure(buf, n);
+        applyParameterIfChanged(hexcaster::ParamId::NoiseGateThreshold_dB,
+                                [&](float value) { noiseGate.setThresholdDb(value); });
+        applyParameterIfChanged(hexcaster::ParamId::NoiseGateAttackMs,
+                                [&](float value) { noiseGate.setAttackMs(value); });
+        applyParameterIfChanged(hexcaster::ParamId::NoiseGateReleaseMs,
+                                [&](float value) { noiseGate.setReleaseMs(value); });
+        applyParameterIfChanged(hexcaster::ParamId::NoiseGateHoldMs,
+                                [&](float value) { noiseGate.setHoldMs(value); });
+        applyParameterIfChanged(hexcaster::ParamId::InputGain_dB,
+                                [&](float value) { inputGain.setGainDb(value); });
+        applyParameterIfChanged(hexcaster::ParamId::BloomBasePre_dB,
+                                [&](float value) { bloom.setBasePreDb(value); });
+        applyParameterIfChanged(hexcaster::ParamId::BloomBasePost_dB,
+                                [&](float value) { bloom.setBasePostDb(value); });
+        applyParameterIfChanged(hexcaster::ParamId::BloomDepth_dB,
+                                [&](float value) { bloom.setDepth(value); });
+        applyParameterIfChanged(hexcaster::ParamId::BloomCompensation,
+                                [&](float value) { bloom.setCompensation(value); });
+        applyParameterIfChanged(hexcaster::ParamId::BloomAttackMs,
+                                [&](float value) { bloom.setAttackMs(value); });
+        applyParameterIfChanged(hexcaster::ParamId::BloomReleaseMs,
+                                [&](float value) { bloom.setReleaseMs(value); });
+        applyParameterIfChanged(hexcaster::ParamId::BloomSensitivity_dB,
+                                [&](float value) { bloom.setSensitivity(value); });
+        applyParameterIfChanged(hexcaster::ParamId::HighShelfGain_dB,
+                                [&](float value) { eq.setHighShelfGainDb(value); });
+        applyParameterIfChanged(hexcaster::ParamId::HighShelfHz,
+                                [&](float value) { eq.setHighShelfHz(value); });
+        applyParameterIfChanged(hexcaster::ParamId::HighShelfBw,
+                                [&](float value) { eq.setHighShelfBw(value); });
+        applyParameterIfChanged(hexcaster::ParamId::LowShelfGain_dB,
+                                [&](float value) { eq.setLowShelfGainDb(value); });
+        applyParameterIfChanged(hexcaster::ParamId::LowShelfHz,
+                                [&](float value) { eq.setLowShelfHz(value); });
+        applyParameterIfChanged(hexcaster::ParamId::LowShelfBw,
+                                [&](float value) { eq.setLowShelfBw(value); });
+        applyParameterIfChanged(hexcaster::ParamId::MasterVolume_dB,
+                                [&](float value) { masterVolume.setGainDb(value); });
+        if (enableTuiObservations)
+            inputMeter.measure(buf, n);
         pipeline.process(buf, n);
-        outputMeter.measure(buf, n);
+        if (enableTuiObservations)
+            outputMeter.measure(buf, n);
     });
 
     // -------------------------------------------------------------------------
@@ -606,6 +689,9 @@ int main(int argc, char** argv)
         engine.stop();
         audioThread.join();
 
+        printRealtimeMetrics(engine.realtimeMetrics(), engine.actualSampleRate(),
+                             engine.actualBufferFrames());
+
         if (audioFailed.load(std::memory_order_relaxed)) {
             runtimeFailed = true;
             std::fprintf(stderr, "Audio engine failed: %s\n",
@@ -629,6 +715,8 @@ int main(int argc, char** argv)
         });
 
         engine.run();
+        printRealtimeMetrics(engine.realtimeMetrics(), engine.actualSampleRate(),
+                             engine.actualBufferFrames());
         const bool audioFailed = !gQuit.load(std::memory_order_relaxed);
         gQuit.store(true, std::memory_order_relaxed);
         watcher.join();

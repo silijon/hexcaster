@@ -1,5 +1,7 @@
 #include "hexcaster/pipeline.h"
+#include "hexcaster/bloom_controller.h"
 #include "hexcaster/gain_stage.h"
+#include "hexcaster/noise_gate.h"
 #include "hexcaster/param_registry.h"
 
 #include <cstdio>
@@ -115,6 +117,73 @@ static void testParamRegistry()
 }
 
 // ----------------------------------------------------------------------------
+// Test: disabling TUI observations does not change default Bloom audio control
+// ----------------------------------------------------------------------------
+static void testHeadlessBloomMatchesObservedBloom()
+{
+    static constexpr int kBlockSize = 64;
+    static constexpr float kSampleRate = 48000.f;
+    static constexpr float kTolerance = 1e-6f;
+
+    hexcaster::GainStage observedPre, observedPost;
+    hexcaster::GainStage headlessPre, headlessPost;
+    hexcaster::BloomController observed(observedPre, observedPost);
+    hexcaster::BloomController headless(headlessPre, headlessPost);
+    observed.setObservationEnabled(true);
+    headless.setObservationEnabled(false);
+    observed.prepare(kSampleRate, kBlockSize);
+    headless.prepare(kSampleRate, kBlockSize);
+
+    float input[kBlockSize];
+    for (int block = 0; block < 12; ++block) {
+        for (int i = 0; i < kBlockSize; ++i) {
+            const int phase = (block * kBlockSize + i) % 23;
+            input[i] = static_cast<float>(phase - 11) / 11.f;
+        }
+        observed.preProcess(input, kBlockSize);
+        headless.preProcess(input, kBlockSize);
+        CHECK(std::fabs(observedPre.getGainDb() - headlessPre.getGainDb()) < kTolerance,
+              "Headless Bloom changed the pre-gain target");
+        CHECK(std::fabs(observedPost.getGainDb() - headlessPost.getGainDb()) < kTolerance,
+              "Headless Bloom changed the post-gain target");
+    }
+
+    std::printf("testHeadlessBloom:     %s\n", gFailures == 0 ? "PASS" : "FAIL");
+}
+
+// ----------------------------------------------------------------------------
+// Test: disabling gate observations does not change processed audio
+// ----------------------------------------------------------------------------
+static void testHeadlessGateMatchesObservedGate()
+{
+    static constexpr int kBlockSize = 64;
+    static constexpr float kSampleRate = 48000.f;
+    static constexpr float kTolerance = 1e-6f;
+
+    hexcaster::NoiseGate observed;
+    hexcaster::NoiseGate headless;
+    observed.setObservationEnabled(true);
+    headless.setObservationEnabled(false);
+    observed.prepare(kSampleRate, kBlockSize);
+    headless.prepare(kSampleRate, kBlockSize);
+
+    float observedBuffer[kBlockSize];
+    float headlessBuffer[kBlockSize];
+    for (int i = 0; i < kBlockSize; ++i) {
+        observedBuffer[i] = (i % 9 == 0) ? 0.5f : 0.01f;
+        headlessBuffer[i] = observedBuffer[i];
+    }
+    observed.process(observedBuffer, kBlockSize);
+    headless.process(headlessBuffer, kBlockSize);
+    for (int i = 0; i < kBlockSize; ++i) {
+        CHECK(std::fabs(observedBuffer[i] - headlessBuffer[i]) < kTolerance,
+              "Headless gate changed processed audio");
+    }
+
+    std::printf("testHeadlessGate:      %s\n", gFailures == 0 ? "PASS" : "FAIL");
+}
+
+// ----------------------------------------------------------------------------
 
 int main()
 {
@@ -123,6 +192,8 @@ int main()
     testUnityPassthrough();
     testGainScaling();
     testParamRegistry();
+    testHeadlessBloomMatchesObservedBloom();
+    testHeadlessGateMatchesObservedGate();
 
     std::printf("---\n");
     if (gFailures == 0) {

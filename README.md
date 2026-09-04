@@ -207,6 +207,26 @@ Add `--tui` when the TUI was enabled. Device and complete CLI discovery:
 ./build/hosts/standalone/hexcaster --help
 ```
 
+For latency qualification, add `--rt-metrics`. On shutdown, the daemon prints
+per-block DSP timing (mean, p95, p99, p99.9, and maximum), deadline misses,
+xruns, short ALSA I/O, and recovery counts. It is intentionally opt-in so the
+clock reads and histogram updates are absent from normal headless operation:
+
+```sh
+./build/hosts/standalone/hexcaster \
+  --model /path/to/model.nam \
+  --input-device hw:CARD=i2,DEV=0 \
+  --output-device hw:CARD=sndrpihifiberry,DEV=0 \
+  --input-level-dbu 11.63 \
+  --buffer 64 \
+  --rt-metrics
+```
+
+The standalone backend logs the final ALSA rate, period, total buffer, and
+period count for both capture and playback. It refuses to start if the two
+devices negotiate different sample rates or period sizes, because this
+synchronous backend cannot process such a mismatch safely.
+
 With MIDI control:
 
 ```sh

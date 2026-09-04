@@ -23,6 +23,34 @@ namespace hexcaster {
 class AudioEngine {
 public:
     /**
+     * Realtime metrics collected with fixed storage in the audio engine.
+     * Values are valid after run() returns. Metrics are opt-in because timing
+     * calls and histogram updates are intentionally excluded from production
+     * headless processing.
+     */
+    struct RealtimeMetrics {
+        bool     enabled              = false;
+        uint64_t processedBlocks      = 0;
+        uint64_t processingMeanNs     = 0;
+        uint64_t processingP95Ns      = 0;
+        uint64_t processingP99Ns      = 0;
+        uint64_t processingP999Ns     = 0;
+        uint64_t processingMaxNs      = 0;
+        uint64_t callbackMeanNs       = 0;
+        uint64_t callbackP95Ns        = 0;
+        uint64_t callbackP99Ns        = 0;
+        uint64_t callbackP999Ns       = 0;
+        uint64_t callbackMaxNs        = 0;
+        uint64_t deadlineMisses       = 0;
+        uint64_t captureOverruns      = 0;
+        uint64_t playbackUnderruns    = 0;
+        uint64_t shortReads           = 0;
+        uint64_t shortWrites          = 0;
+        uint64_t recoveryAttempts     = 0;
+        uint64_t recoveryFailures     = 0;
+    };
+
+    /**
      * ProcessCallback: called once per audio block from the RT thread.
      * The buffer is mono float, in-place -- modify it and return.
      * Must be real-time safe: no allocation, no blocking, no I/O.
@@ -49,6 +77,7 @@ public:
         unsigned int sampleRate     = 48000;
         unsigned int bufferFrames   = 128;
         unsigned int periods        = 2;
+        bool         enableRealtimeMetrics = false;
         int          inputChannel   = 0;    // 0=left, 1=right
         int          outputChannels = 0x3;  // bitmask: 0x1=L, 0x2=R, 0x3=both
     };
@@ -101,6 +130,12 @@ public:
      * Valid after open().
      */
     virtual unsigned int actualBufferFrames() const = 0;
+
+    /**
+     * Return a completed-run metrics snapshot. Call after run() returns or
+     * after the audio thread has joined; it is not a live cross-thread API.
+     */
+    virtual RealtimeMetrics realtimeMetrics() const = 0;
 };
 
 } // namespace hexcaster

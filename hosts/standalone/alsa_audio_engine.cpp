@@ -4,11 +4,50 @@
 #include <pthread.h>
 #include <sched.h>
 
+#include <algorithm>
 #include <cassert>
+#include <cerrno>
+#include <ctime>
 #include <cstdio>
 #include <cstring>
+#include <sys/mman.h>
+#include <unistd.h>
+
+#if defined(__SSE__)
+#include <xmmintrin.h>
+#endif
 
 namespace hexcaster {
+
+namespace {
+
+void enableFlushToZero() noexcept
+{
+#if defined(__aarch64__)
+    // AArch64 FPCR bit 24 is FZ (flush subnormal results to zero).
+    uint64_t fpcr = 0;
+    asm volatile("mrs %0, fpcr" : "=r"(fpcr));
+    fpcr |= (uint64_t{1} << 24);
+    asm volatile("msr fpcr, %0" : : "r"(fpcr));
+#elif defined(__SSE__)
+    _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
+#endif
+}
+
+void prefaultAudioStack() noexcept
+{
+    // Touch enough stack for the engine loop, callback dispatch, and DSP call
+    // chain before entering the blocking realtime loop. mlockall(MCL_FUTURE)
+    // keeps these pages resident when it succeeds.
+    constexpr std::size_t kPrefaultBytes = 64 * 1024;
+    constexpr std::size_t kPageBytes = 4096;
+    volatile char stack[kPrefaultBytes];
+    for (std::size_t offset = 0; offset < kPrefaultBytes; offset += kPageBytes)
+        stack[offset] = 0;
+    (void)stack[0];
+}
+
+} // namespace
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -40,15 +79,48 @@ AlsaAudioEngine::~AlsaAudioEngine()
 
 bool AlsaAudioEngine::open(const Config& config)
 {
+    if (config.sampleRate == 0 || config.bufferFrames == 0 || config.periods < 2) {
+        errorMsg_ = "Invalid ALSA configuration: sample rate and period must be non-zero; at least two periods are required";
+        return false;
+    }
+
     config_ = config;
     captureChannels_  = 1;
     playbackChannels_ = 2;
+    captureSettings_ = {};
+    playbackSettings_ = {};
+    actualRate_ = 0;
+    actualFrames_ = 0;
+    lastAlsaError_ = 0;
+    metrics_ = {};
 
-    if (!openHandle(config_.inputDevice,  true,  captureHandle_,  captureChannels_,  captureFmt_))
+    if (!openHandle(config_.inputDevice, true, captureHandle_, captureChannels_,
+                    captureFmt_, captureSettings_))
         return false;
 
-    if (!openHandle(config_.outputDevice, false, playbackHandle_, playbackChannels_, playbackFmt_))
+    if (!openHandle(config_.outputDevice, false, playbackHandle_, playbackChannels_,
+                    playbackFmt_, playbackSettings_)) {
+        close();
         return false;
+    }
+
+    // The synchronous read -> process -> write loop requires equal sample
+    // rates and period sizes. Do not silently use the output device's values
+    // for capture buffers when the devices negotiated differently.
+    if (captureSettings_.sampleRate != playbackSettings_.sampleRate ||
+        captureSettings_.periodFrames != playbackSettings_.periodFrames) {
+        errorMsg_ = "Capture/playback ALSA settings differ: capture rate="
+            + std::to_string(captureSettings_.sampleRate)
+            + " period=" + std::to_string(captureSettings_.periodFrames)
+            + ", playback rate=" + std::to_string(playbackSettings_.sampleRate)
+            + " period=" + std::to_string(playbackSettings_.periodFrames)
+            + ". This synchronous backend requires matching rate and period size.";
+        close();
+        return false;
+    }
+
+    actualRate_ = captureSettings_.sampleRate;
+    actualFrames_ = captureSettings_.periodFrames;
 
     // Pre-allocate raw interleaved buffers using actual negotiated format sizes
     const int frames = static_cast<int>(actualFrames_);
@@ -71,7 +143,7 @@ bool AlsaAudioEngine::open(const Config& config)
 
 bool AlsaAudioEngine::openHandle(const std::string& device, bool isCapture,
                                    snd_pcm_t*& handle, unsigned int& channels,
-                                   SampleFormat& fmt)
+                                   SampleFormat& fmt, DeviceSettings& settings)
 {
     const snd_pcm_stream_t stream = isCapture
         ? SND_PCM_STREAM_CAPTURE
@@ -113,8 +185,6 @@ bool AlsaAudioEngine::openHandle(const std::string& device, bool isCapture,
         unsigned int rate = config_.sampleRate;
         if (snd_pcm_hw_params_set_rate_near(handle, hw, &rate, nullptr) < 0)
             continue;
-        actualRate_ = rate;
-
         // Channels -- try requested count, fall back to min/max
         if (snd_pcm_hw_params_set_channels(handle, hw, channels) < 0) {
             unsigned int minCh = 1, maxCh = 2;
@@ -144,14 +214,30 @@ bool AlsaAudioEngine::openHandle(const std::string& device, bool isCapture,
             continue;
         }
 
+        // Query the committed parameters. ALSA's *_near calls may choose
+        // values different from the requested values.
+        snd_pcm_hw_params_current(handle, hw);
+        snd_pcm_uframes_t actualPeriod = 0;
+        snd_pcm_uframes_t actualBuffer = 0;
+        unsigned int actualRate = 0;
+        unsigned int actualPeriods = 0;
+        snd_pcm_hw_params_get_rate(hw, &actualRate, nullptr);
+        snd_pcm_hw_params_get_period_size(hw, &actualPeriod, nullptr);
+        snd_pcm_hw_params_get_buffer_size(hw, &actualBuffer);
+        snd_pcm_hw_params_get_periods(hw, &actualPeriods, nullptr);
+
         fmt = f.our;
-        actualFrames_ = static_cast<unsigned int>(periodSize);
+        settings.sampleRate = actualRate;
+        settings.periodFrames = static_cast<unsigned int>(actualPeriod);
+        settings.bufferFrames = static_cast<unsigned int>(actualBuffer);
+        settings.periods = actualPeriods;
         configured = true;
 
         std::fprintf(stderr,
-            "ALSA %s: device=%s format=%s channels=%u rate=%u period=%u\n",
+            "ALSA %s: device=%s format=%s channels=%u rate=%u period=%u buffer=%u periods=%u\n",
             isCapture ? "capture " : "playback",
-            device.c_str(), f.name, channels, actualRate_, actualFrames_);
+            device.c_str(), f.name, channels, settings.sampleRate,
+            settings.periodFrames, settings.bufferFrames, settings.periods);
         break;
     }
 
@@ -168,8 +254,11 @@ bool AlsaAudioEngine::openHandle(const std::string& device, bool isCapture,
     snd_pcm_sw_params_t* sw = nullptr;
     snd_pcm_sw_params_alloca(&sw);
     snd_pcm_sw_params_current(handle, sw);
-    snd_pcm_sw_params_set_start_threshold(handle, sw, actualFrames_);
-    snd_pcm_sw_params_set_avail_min(handle, sw, actualFrames_);
+    const snd_pcm_uframes_t startThreshold = isCapture
+        ? settings.periodFrames
+        : settings.bufferFrames;
+    snd_pcm_sw_params_set_start_threshold(handle, sw, startThreshold);
+    snd_pcm_sw_params_set_avail_min(handle, sw, settings.periodFrames);
     if (snd_pcm_sw_params(handle, sw) < 0) {
         std::fprintf(stderr, "Warning: sw_params failed for %s\n", device.c_str());
     }
@@ -201,6 +290,14 @@ void AlsaAudioEngine::run()
         return;
     }
 
+    if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
+        std::fprintf(stderr,
+            "Warning: mlockall failed: %s. Realtime page-fault protection is unavailable.\n",
+            std::strerror(errno));
+    }
+    prefaultAudioStack();
+    enableFlushToZero();
+
     // Request SCHED_FIFO real-time priority (best-effort)
     {
         struct sched_param sp{};
@@ -215,11 +312,23 @@ void AlsaAudioEngine::run()
     }
 
     // Streams are always on separate devices -- prepare both independently.
-    snd_pcm_prepare(captureHandle_);
-    snd_pcm_prepare(playbackHandle_);
+    int err = snd_pcm_prepare(captureHandle_);
+    if (err < 0) {
+        errorMsg_ = std::string("Capture prepare failed: ") + snd_strerror(err);
+        return;
+    }
+    err = snd_pcm_prepare(playbackHandle_);
+    if (err < 0) {
+        errorMsg_ = std::string("Playback prepare failed: ") + snd_strerror(err);
+        return;
+    }
 
     // Prime the playback buffer to prevent underrun before the first read
-    primePlayback();
+    if (!primePlayback()) {
+        errorMsg_ = std::string("Playback priming failed: ")
+                  + snd_strerror(lastAlsaError_);
+        return;
+    }
 
     running_.store(true, std::memory_order_release);
 
@@ -233,36 +342,56 @@ void AlsaAudioEngine::run()
     while (running_.load(std::memory_order_acquire)) {
 
         // --- Capture ---
-        snd_pcm_sframes_t n = snd_pcm_readi(captureHandle_, captureRaw_.data(), frames);
-
-        if (n < 0) {
-            std::fprintf(stderr, "Capture error: %s -- recovering\n", snd_strerror(static_cast<int>(n)));
+        if (!readCaptureBlock(frames)) {
+            if (!running_.load(std::memory_order_acquire))
+                break;
             if (!recoverBoth()) break;
             continue;
         }
 
-        // Short read -- skip block, don't write garbage to output
-        if (n != frames) continue;
+        const bool measure = config_.enableRealtimeMetrics;
+        const uint64_t processingStartNs = measure ? monotonicRawNs() : 0;
 
         // --- Convert capture -> mono float ---
         deinterleaveCapture(captureRaw_.data(), monoBuffer_.data(),
                              frames, captureChannels_, config_.inputChannel);
 
         // --- DSP ---
+        const uint64_t callbackStartNs = measure ? monotonicRawNs() : 0;
         callback_(monoBuffer_.data(), frames);
+        if (measure) {
+            recordDuration(metrics_.callbackHistogram,
+                           monotonicRawNs() - callbackStartNs,
+                           metrics_.callbackTotalNs, metrics_.callbackMaxNs);
+        }
 
         // --- Convert mono float -> playback ---
         interleavePlayback(monoBuffer_.data(), playbackRaw_.data(),
                             frames, playbackChannels_, config_.outputChannels);
 
-        // --- Playback ---
-        n = snd_pcm_writei(playbackHandle_, playbackRaw_.data(), frames);
+        if (measure) {
+            const uint64_t processingNs = monotonicRawNs() - processingStartNs;
+            recordDuration(metrics_.processingHistogram, processingNs,
+                           metrics_.processingTotalNs, metrics_.processingMaxNs);
+            ++metrics_.blockCount;
+            const uint64_t deadlineNs =
+                (static_cast<uint64_t>(frames) * 1000000000ull) / actualRate_;
+            if (processingNs > deadlineNs)
+                ++metrics_.deadlineMisses;
+        }
 
-        if (n < 0) {
-            std::fprintf(stderr, "Playback error: %s -- recovering\n", snd_strerror(static_cast<int>(n)));
+        // --- Playback ---
+        if (!writePlaybackBlock(playbackRaw_.data(), frames)) {
+            if (!running_.load(std::memory_order_acquire))
+                break;
             if (!recoverBoth()) break;
             continue;
         }
+    }
+
+    if (lastAlsaError_ < 0 && errorMsg_.empty()) {
+        errorMsg_ = std::string(lastErrorWasCapture_ ? "Capture" : "Playback")
+                  + " error: " + snd_strerror(lastAlsaError_);
     }
 
     std::fprintf(stderr, "Audio engine stopped.\n");
@@ -304,6 +433,9 @@ void AlsaAudioEngine::close()
 
 bool AlsaAudioEngine::recoverBoth()
 {
+    if (config_.enableRealtimeMetrics)
+        ++metrics_.recoveryAttempts;
+
     // Drop both streams unconditionally -- safe from any PCM state,
     // forces both handles back to SETUP.
     snd_pcm_drop(captureHandle_);
@@ -312,30 +444,176 @@ bool AlsaAudioEngine::recoverBoth()
     // Prepare both independently (streams are always on separate devices).
     int err = snd_pcm_prepare(captureHandle_);
     if (err < 0) {
-        std::fprintf(stderr, "Capture prepare failed: %s\n", snd_strerror(err));
-        errorMsg_ = std::string("Capture prepare failed: ") + snd_strerror(err);
+        lastAlsaError_ = err;
+        lastErrorWasCapture_ = true;
+        if (config_.enableRealtimeMetrics)
+            ++metrics_.recoveryFailures;
         return false;
     }
 
     err = snd_pcm_prepare(playbackHandle_);
     if (err < 0) {
-        std::fprintf(stderr, "Playback prepare failed: %s\n", snd_strerror(err));
-        errorMsg_ = std::string("Playback prepare failed: ") + snd_strerror(err);
+        lastAlsaError_ = err;
+        lastErrorWasCapture_ = false;
+        if (config_.enableRealtimeMetrics)
+            ++metrics_.recoveryFailures;
         return false;
     }
 
-    primePlayback();
+    if (!primePlayback()) {
+        if (config_.enableRealtimeMetrics)
+            ++metrics_.recoveryFailures;
+        return false;
+    }
+    lastAlsaError_ = 0;
     return true;
 }
 
-void AlsaAudioEngine::primePlayback()
+bool AlsaAudioEngine::primePlayback()
 {
     // Write `periods` blocks of silence to fill the playback buffer
     // before capture starts, so the output never starves on first block.
-    for (unsigned int p = 0; p < config_.periods; ++p) {
-        snd_pcm_writei(playbackHandle_, silenceRaw_.data(),
-                       static_cast<snd_pcm_uframes_t>(actualFrames_));
+    for (unsigned int p = 0; p < playbackSettings_.periods; ++p) {
+        if (!writePlaybackBlock(silenceRaw_.data(),
+                                static_cast<int>(playbackSettings_.periodFrames)))
+            return false;
     }
+    return true;
+}
+
+bool AlsaAudioEngine::readCaptureBlock(int frames)
+{
+    const int bytesPerFrame = captureChannels_ * bytesPerSample(captureFmt_);
+    int offset = 0;
+    while (offset < frames) {
+        const int remaining = frames - offset;
+        auto* destination = captureRaw_.data()
+            + static_cast<std::size_t>(offset) * bytesPerFrame;
+        const snd_pcm_sframes_t result = snd_pcm_readi(
+            captureHandle_, destination, static_cast<snd_pcm_uframes_t>(remaining));
+        if (result > 0) {
+            if (result != remaining && config_.enableRealtimeMetrics)
+                ++metrics_.shortReads;
+            offset += static_cast<int>(result);
+            continue;
+        }
+
+        // A blocking ALSA handle should not return zero frames. Treat it as a
+        // recoverable I/O failure rather than spinning in the realtime loop.
+        recordIoError(true, result < 0 ? static_cast<int>(result) : -EIO);
+        return false;
+    }
+    return true;
+}
+
+bool AlsaAudioEngine::writePlaybackBlock(const void* data, int frames)
+{
+    const int bytesPerFrame = playbackChannels_ * bytesPerSample(playbackFmt_);
+    int offset = 0;
+    while (offset < frames) {
+        const int remaining = frames - offset;
+        const auto* source = static_cast<const uint8_t*>(data)
+            + static_cast<std::size_t>(offset) * bytesPerFrame;
+        const snd_pcm_sframes_t result = snd_pcm_writei(
+            playbackHandle_, source, static_cast<snd_pcm_uframes_t>(remaining));
+        if (result > 0) {
+            if (result != remaining && config_.enableRealtimeMetrics)
+                ++metrics_.shortWrites;
+            offset += static_cast<int>(result);
+            continue;
+        }
+
+        // A blocking ALSA handle should not return zero frames. Treat it as a
+        // recoverable I/O failure rather than spinning in the realtime loop.
+        recordIoError(false, result < 0 ? static_cast<int>(result) : -EIO);
+        return false;
+    }
+    return true;
+}
+
+void AlsaAudioEngine::recordIoError(bool capture, int errorCode)
+{
+    lastAlsaError_ = errorCode;
+    lastErrorWasCapture_ = capture;
+    if (!config_.enableRealtimeMetrics)
+        return;
+
+    if (capture && errorCode == -EPIPE)
+        ++metrics_.captureOverruns;
+    if (!capture && errorCode == -EPIPE)
+        ++metrics_.playbackUnderruns;
+}
+
+uint64_t AlsaAudioEngine::monotonicRawNs() noexcept
+{
+    timespec now{};
+    clock_gettime(CLOCK_MONOTONIC_RAW, &now);
+    return static_cast<uint64_t>(now.tv_sec) * 1000000000ull
+         + static_cast<uint64_t>(now.tv_nsec);
+}
+
+void AlsaAudioEngine::recordDuration(std::array<uint32_t, kMetricBins>& histogram,
+                                     uint64_t durationNs, uint64_t& totalNs,
+                                     uint64_t& maxNs)
+{
+    totalNs += durationNs;
+    maxNs = std::max(maxNs, durationNs);
+    const std::size_t bin = std::min<std::size_t>(
+        durationNs / kMetricBinNs, histogram.size() - 1);
+    ++histogram[bin];
+}
+
+uint64_t AlsaAudioEngine::percentileNs(
+    const std::array<uint32_t, kMetricBins>& histogram,
+    uint64_t count, unsigned int perThousand) noexcept
+{
+    if (count == 0)
+        return 0;
+
+    const uint64_t rank = (count * perThousand + 999) / 1000;
+    uint64_t accumulated = 0;
+    for (std::size_t bin = 0; bin < histogram.size(); ++bin) {
+        accumulated += histogram[bin];
+        if (accumulated >= rank)
+            return static_cast<uint64_t>(bin) * kMetricBinNs;
+    }
+    return static_cast<uint64_t>(histogram.size() - 1) * kMetricBinNs;
+}
+
+AudioEngine::RealtimeMetrics AlsaAudioEngine::realtimeMetrics() const
+{
+    RealtimeMetrics result;
+    result.enabled = config_.enableRealtimeMetrics;
+    if (!result.enabled)
+        return result;
+
+    result.processedBlocks = metrics_.blockCount;
+    if (metrics_.blockCount > 0) {
+        result.processingMeanNs = metrics_.processingTotalNs / metrics_.blockCount;
+        result.processingP95Ns = percentileNs(metrics_.processingHistogram,
+                                              metrics_.blockCount, 950);
+        result.processingP99Ns = percentileNs(metrics_.processingHistogram,
+                                              metrics_.blockCount, 990);
+        result.processingP999Ns = percentileNs(metrics_.processingHistogram,
+                                               metrics_.blockCount, 999);
+        result.processingMaxNs = metrics_.processingMaxNs;
+        result.callbackMeanNs = metrics_.callbackTotalNs / metrics_.blockCount;
+        result.callbackP95Ns = percentileNs(metrics_.callbackHistogram,
+                                            metrics_.blockCount, 950);
+        result.callbackP99Ns = percentileNs(metrics_.callbackHistogram,
+                                            metrics_.blockCount, 990);
+        result.callbackP999Ns = percentileNs(metrics_.callbackHistogram,
+                                             metrics_.blockCount, 999);
+        result.callbackMaxNs = metrics_.callbackMaxNs;
+    }
+    result.deadlineMisses = metrics_.deadlineMisses;
+    result.captureOverruns = metrics_.captureOverruns;
+    result.playbackUnderruns = metrics_.playbackUnderruns;
+    result.shortReads = metrics_.shortReads;
+    result.shortWrites = metrics_.shortWrites;
+    result.recoveryAttempts = metrics_.recoveryAttempts;
+    result.recoveryFailures = metrics_.recoveryFailures;
+    return result;
 }
 
 // ---------------------------------------------------------------------------
