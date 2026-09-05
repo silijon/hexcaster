@@ -484,6 +484,10 @@ The physical cabinet provides speaker filtering. No IR convolution stage.
 
 ## Performance Targets (Raspberry Pi 5)
 
+> **Known Pi 5 I2S issue:** 128-frame testing with the HiFiBerry Amp100 has
+> reproduced an RP1 DMA kernel crash during ALSA xrun recovery. Read
+> [the incident report](docs/PI5_I2S_DMA_FAILURE.md) before low-buffer testing.
+
 - 48 kHz sample rate
 - 64–128 sample buffer
 - < 50% CPU total
