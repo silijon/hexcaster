@@ -103,8 +103,9 @@ public:
     virtual void run() = 0;
 
     /**
-     * Signal the audio loop to stop. Safe to call from a signal handler.
-     * run() will return shortly after.
+     * Signal the audio loop to stop without touching backend handles from the
+     * caller's thread. Safe to call from a signal handler. run() will return
+     * after its current bounded I/O wait.
      */
     virtual void stop() = 0;
 

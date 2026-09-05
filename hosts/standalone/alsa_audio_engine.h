@@ -21,8 +21,9 @@ namespace hexcaster {
  * HexCaster always uses separate ADC (USB input) and DAC (amp board output)
  * devices, so snd_pcm_link() is not used.
  * run() occupies the calling thread, but PCM reads and writes are nonblocking
- * and coordinated with bounded snd_pcm_wait() calls so shutdown cannot hang
- * behind a stalled device. The thread requests SCHED_FIFO priority.
+ * and coordinated with bounded snd_pcm_wait() calls. stop() only signals the
+ * loop; all PCM-handle operations remain on the realtime thread to avoid
+ * cross-thread ALSA/driver deadlocks. The thread requests SCHED_FIFO priority.
  *
  * Channel handling:
  *   - Capture: reads N-channel interleaved audio, extracts config.inputChannel

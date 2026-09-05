@@ -426,11 +426,12 @@ void AlsaAudioEngine::run()
 
 void AlsaAudioEngine::stop()
 {
+    // Do not call ALSA from this control/watcher thread. Concurrent access to
+    // a PCM handle while the realtime thread is in wait/read/write can wedge
+    // inside the ALSA driver and become unkillable. PCM I/O is nonblocking and
+    // snd_pcm_wait() has a finite timeout, so clearing this flag is sufficient;
+    // run() will unwind within one bounded wait interval.
     running_.store(false, std::memory_order_release);
-    // Interrupt either side of the loop. The thread may be waiting for capture
-    // or playback, especially when independent device clocks have drifted.
-    if (captureHandle_) snd_pcm_drop(captureHandle_);
-    if (playbackHandle_) snd_pcm_drop(playbackHandle_);
 }
 
 void AlsaAudioEngine::close()
