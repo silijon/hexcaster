@@ -110,6 +110,7 @@ private:
                     SampleFormat& fmt, DeviceSettings& settings);
 
     bool recoverBoth();
+    bool startCaptureAndPrimePlayback();
     bool readCaptureBlock(int frames);
     bool writePlaybackBlock(const void* data, int frames);
     bool waitForIo(snd_pcm_t* handle, bool capture, int& waitAttempts);

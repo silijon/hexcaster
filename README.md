@@ -358,6 +358,24 @@ sudo systemctl restart hexcaster
 sudo systemctl status hexcaster --no-pager
 ```
 
+If systemd reports `status=203/EXEC`, it could not execute the installed
+daemon (this occurs before HexCaster starts). Reinstall the runtime and verify
+the installed file before restarting:
+
+```sh
+sudo cmake --install build-pi --component hexcaster-runtime
+sudo test -x /usr/bin/hexcaster
+file /usr/bin/hexcaster
+sudo systemctl daemon-reload
+sudo systemctl reset-failed hexcaster
+sudo systemctl restart hexcaster
+sudo journalctl -u hexcaster -n 50 --no-pager -o cat -l
+```
+
+The generated service also checks that its configured HexCaster executable is
+present and executable before attempting `ExecStart`, so a missing deployment
+now fails at `ExecStartPre` instead of producing the less specific 203 status.
+
 `cmake --install ... --component hexcaster-runtime` updates installed files but
 does not run `systemd-sysusers`, enable the unit, or restart the service. Use
 `install-pi` for first installation and the component install for updates.

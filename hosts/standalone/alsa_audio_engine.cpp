@@ -261,13 +261,14 @@ bool AlsaAudioEngine::openHandle(const std::string& device, bool isCapture,
         return false;
     }
 
-    // SW params: start when the first period is written/read. Keeping the
-    // playback threshold at one period matches the proven original behavior
-    // and avoids coupling startup/recovery to a completely full buffer.
+    // Capture is started explicitly before playback. Playback starts only once
+    // its complete ALSA buffer has been primed, preserving one full period of
+    // scheduling headroom when the processing loop begins.
     snd_pcm_sw_params_t* sw = nullptr;
     snd_pcm_sw_params_alloca(&sw);
     snd_pcm_sw_params_current(handle, sw);
-    snd_pcm_sw_params_set_start_threshold(handle, sw, settings.periodFrames);
+    snd_pcm_sw_params_set_start_threshold(
+        handle, sw, isCapture ? settings.periodFrames : settings.bufferFrames);
     snd_pcm_sw_params_set_avail_min(handle, sw, settings.periodFrames);
     if (snd_pcm_sw_params(handle, sw) < 0) {
         std::fprintf(stderr, "Warning: sw_params failed for %s\n", device.c_str());
@@ -347,10 +348,13 @@ void AlsaAudioEngine::run()
     // playback readiness, and stop() must be able to interrupt that wait.
     running_.store(true, std::memory_order_release);
 
-    // Prime the playback buffer to prevent underrun before the first read
-    if (!primePlayback()) {
+    // Make a complete capture period available before playback starts. USB
+    // capture startup can take longer than the entire two-period playback
+    // buffer; starting playback first creates an immediate recovery storm.
+    if (!startCaptureAndPrimePlayback()) {
         running_.store(false, std::memory_order_release);
-        errorMsg_ = std::string("Playback priming failed: ")
+        errorMsg_ = std::string("Audio stream startup failed on ")
+                  + (lastErrorWasCapture_ ? "capture: " : "playback: ")
                   + snd_strerror(lastAlsaError_);
         return;
     }
@@ -488,7 +492,7 @@ bool AlsaAudioEngine::recoverBoth()
         return false;
     }
 
-    if (!primePlayback()) {
+    if (!startCaptureAndPrimePlayback()) {
         liveRecoveryFailures_.fetch_add(1, std::memory_order_relaxed);
         if (config_.enableRealtimeMetrics)
             ++metrics_.recoveryFailures;
@@ -498,14 +502,34 @@ bool AlsaAudioEngine::recoverBoth()
     return true;
 }
 
+bool AlsaAudioEngine::startCaptureAndPrimePlayback()
+{
+    int err = snd_pcm_start(captureHandle_);
+    if (err < 0) {
+        recordIoError(true, err);
+        return false;
+    }
+
+    // Wait until avail_min (one complete capture period) is ready. Playback is
+    // still prepared but stopped, so it cannot underrun during USB startup.
+    int waitAttempts = 0;
+    if (!waitForIo(captureHandle_, true, waitAttempts))
+        return false;
+
+    return primePlayback();
+}
+
 bool AlsaAudioEngine::primePlayback()
 {
-    // Write `periods` blocks of silence to fill the playback buffer
-    // before capture starts, so the output never starves on first block.
-    for (unsigned int p = 0; p < playbackSettings_.periods; ++p) {
-        if (!writePlaybackBlock(silenceRaw_.data(),
-                                static_cast<int>(playbackSettings_.periodFrames)))
+    // Fill the exact committed playback buffer size. The full-buffer start
+    // threshold starts playback after the final write.
+    unsigned int remaining = playbackSettings_.bufferFrames;
+    while (remaining > 0) {
+        const unsigned int frames = std::min(remaining,
+                                             playbackSettings_.periodFrames);
+        if (!writePlaybackBlock(silenceRaw_.data(), static_cast<int>(frames)))
             return false;
+        remaining -= frames;
     }
     return true;
 }
