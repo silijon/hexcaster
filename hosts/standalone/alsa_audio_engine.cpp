@@ -261,17 +261,13 @@ bool AlsaAudioEngine::openHandle(const std::string& device, bool isCapture,
         return false;
     }
 
-    // Disable ALSA's implicit start-on-read/write. Capture and playback are on
-    // independent devices, so starting either one while the other is still
-    // being initialized immediately risks an overrun or underrun. Playback is
-    // primed while both streams remain PREPARED, then both are started
-    // explicitly back-to-back.
+    // SW params: start when the first period is written/read. Keeping the
+    // playback threshold at one period matches the proven original behavior
+    // and avoids coupling startup/recovery to a completely full buffer.
     snd_pcm_sw_params_t* sw = nullptr;
     snd_pcm_sw_params_alloca(&sw);
     snd_pcm_sw_params_current(handle, sw);
-    snd_pcm_uframes_t boundary = 0;
-    snd_pcm_sw_params_get_boundary(sw, &boundary);
-    snd_pcm_sw_params_set_start_threshold(handle, sw, boundary);
+    snd_pcm_sw_params_set_start_threshold(handle, sw, settings.periodFrames);
     snd_pcm_sw_params_set_avail_min(handle, sw, settings.periodFrames);
     if (snd_pcm_sw_params(handle, sw) < 0) {
         std::fprintf(stderr, "Warning: sw_params failed for %s\n", device.c_str());
@@ -351,12 +347,10 @@ void AlsaAudioEngine::run()
     // playback readiness, and stop() must be able to interrupt that wait.
     running_.store(true, std::memory_order_release);
 
-    // Prime playback while both streams are stopped, then start the independent
-    // devices back-to-back so neither spends initialization time running alone.
-    if (!primeAndStartStreams()) {
+    // Prime the playback buffer to prevent underrun before the first read
+    if (!primePlayback()) {
         running_.store(false, std::memory_order_release);
-        errorMsg_ = std::string("Audio stream startup failed on ")
-                  + (lastErrorWasCapture_ ? "capture: " : "playback: ")
+        errorMsg_ = std::string("Playback priming failed: ")
                   + snd_strerror(lastAlsaError_);
         return;
     }
@@ -494,7 +488,7 @@ bool AlsaAudioEngine::recoverBoth()
         return false;
     }
 
-    if (!primeAndStartStreams()) {
+    if (!primePlayback()) {
         liveRecoveryFailures_.fetch_add(1, std::memory_order_relaxed);
         if (config_.enableRealtimeMetrics)
             ++metrics_.recoveryFailures;
@@ -504,40 +498,14 @@ bool AlsaAudioEngine::recoverBoth()
     return true;
 }
 
-bool AlsaAudioEngine::primeAndStartStreams()
-{
-    if (!primePlayback())
-        return false;
-
-    // Starting capture first gives playback a completely full buffer while the
-    // USB device begins producing its first period. These calls only transition
-    // already-prepared devices; no model or buffer initialization occurs here.
-    int err = snd_pcm_start(captureHandle_);
-    if (err < 0) {
-        recordIoError(true, err);
-        return false;
-    }
-
-    err = snd_pcm_start(playbackHandle_);
-    if (err < 0) {
-        recordIoError(false, err);
-        return false;
-    }
-
-    return true;
-}
-
 bool AlsaAudioEngine::primePlayback()
 {
-    // Fill the exact committed playback buffer size. The start threshold is
-    // ALSA's boundary value, so these writes cannot start playback implicitly.
-    unsigned int remaining = playbackSettings_.bufferFrames;
-    while (remaining > 0) {
-        const unsigned int frames = std::min(remaining,
-                                             playbackSettings_.periodFrames);
-        if (!writePlaybackBlock(silenceRaw_.data(), static_cast<int>(frames)))
+    // Write `periods` blocks of silence to fill the playback buffer
+    // before capture starts, so the output never starves on first block.
+    for (unsigned int p = 0; p < playbackSettings_.periods; ++p) {
+        if (!writePlaybackBlock(silenceRaw_.data(),
+                                static_cast<int>(playbackSettings_.periodFrames)))
             return false;
-        remaining -= frames;
     }
     return true;
 }
@@ -834,8 +802,7 @@ void AlsaAudioEngine::interleavePlayback(const float* mono, void* raw,
                 for (int c = 0; c < totalChannels; ++c)
                     if (channelMask & (1 << c))
                         dst[i * totalChannels + c] =
-                            static_cast<int16_t>(
-                                std::clamp(mono[i], -1.f, 1.f) * kScale);
+                            static_cast<int16_t>(mono[i] * kScale);
             break;
         }
         case SampleFormat::Int32: {
@@ -847,8 +814,7 @@ void AlsaAudioEngine::interleavePlayback(const float* mono, void* raw,
                 for (int c = 0; c < totalChannels; ++c)
                     if (channelMask & (1 << c))
                         dst[i * totalChannels + c] =
-                            static_cast<int32_t>(
-                                std::clamp(mono[i], -1.f, 1.f) * kScale);
+                            static_cast<int32_t>(mono[i] * kScale);
             break;
         }
         case SampleFormat::Float32: {
